@@ -5,7 +5,8 @@ import type { Teacher, TimetableEntry } from "../types"
 import {
   getTeachers,
   getTimetables,
-  saveTimetables
+  saveTimetables,
+  getReliefAssignments
 } from "../utils/storage"
 
 const DAYS = [
@@ -107,15 +108,74 @@ function Timetables() {
     setSuccess("Timetable entry added successfully.")
   }
 
-  function handleDelete(id: string) {
-    if (!window.confirm("Delete this timetable entry?")) return
+  
+function handleDelete(id: string) {
+  setError("")
+  setSuccess("")
 
-    const updated = entries.filter((entry) => entry.id !== id)
-    setEntries(updated)
-    saveTimetables(updated)
-    setError("")
-    setSuccess("Timetable entry deleted.")
+  const entry = entries.find(
+    (item) => item.id === id
+  )
+
+  if (!entry) {
+    setError("Timetable entry not found.")
+    return
   }
+
+  const assignments = getReliefAssignments()
+
+  const hasRelatedRelief = assignments.some(
+    (assignment) => {
+      const [year, month, day] = assignment.date
+        .split("-")
+        .map(Number)
+
+      const assignmentDay = new Date(
+        year,
+        month - 1,
+        day
+      ).toLocaleDateString("en-US", {
+        weekday: "long"
+      })
+
+      return (
+        assignment.absentTeacherId === entry.teacherId &&
+        assignment.className.toLowerCase() ===
+          entry.className.toLowerCase() &&
+        assignment.period === entry.period &&
+        assignmentDay === entry.day
+      )
+    }
+  )
+
+  if (hasRelatedRelief) {
+    window.alert(
+      "Cannot delete this timetable entry.\n\n" +
+      "One or more relief assignments are linked " +
+      "to this lesson.\n\n" +
+      "Remove those relief assignments first, " +
+      "then delete the timetable entry."
+    )
+    return
+  }
+
+  const confirmed = window.confirm(
+    `Delete ${entry.className}, ` +
+    `${entry.day}, Period ${entry.period}?`
+  )
+
+  if (!confirmed) return
+
+  const updated = entries.filter(
+    (item) => item.id !== id
+  )
+
+  setEntries(updated)
+  saveTimetables(updated)
+
+  setSuccess("Timetable entry deleted successfully.")
+}
+
 
   const visibleEntries = entries
     .filter((entry) => filterDay === "All" || entry.day === filterDay)

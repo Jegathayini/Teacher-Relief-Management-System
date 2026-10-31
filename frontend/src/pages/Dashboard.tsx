@@ -1,4 +1,7 @@
+import { useEffect } from "react"
+import { checkBackendHealth } from "../services/api"
 
+import { exportBackup } from "../utils/backup"
 import { useState } from "react"
 import type {
   Teacher,
@@ -13,6 +16,7 @@ import {
   getAbsences,
   getReliefAssignments
 } from "../utils/storage"
+
 
 function getToday(): string {
   const now = new Date()
@@ -41,6 +45,25 @@ function Dashboard() {
     useState<ReliefAssignment[]>(getReliefAssignments)
 
   const [date, setDate] = useState(getToday)
+  
+  const [backendStatus, setBackendStatus] = useState(
+  "Checking backend connection..."
+)
+
+useEffect(() => {
+  async function testConnection() {
+    try {
+      const result = await checkBackendHealth()
+      setBackendStatus(result.message)
+    } catch (error) {
+      console.error("Backend connection failed:", error)
+      setBackendStatus("Backend disconnected")
+    }
+  }
+
+  void testConnection()
+}, [])
+
 
   const dayName = getDayName(date)
 
@@ -109,50 +132,65 @@ function Dashboard() {
 
   return (
     <section className="space-y-6">
-      <div className="flex flex-wrap items-end justify-between gap-4">
-        <div>
-          <h1 className="text-2xl font-bold text-cyan-400">
-            Dashboard Overview
-          </h1>
-          <p className="mt-1 text-slate-400">
-            Monitor daily teacher availability and relief coverage.
-          </p>
-        </div>
+      <div className="rounded-lg border border-slate-700 bg-slate-800 p-3 text-sm text-cyan-400">
+  Backend Status: {backendStatus}
+</div>
+<div className="flex flex-wrap items-end justify-between gap-4">
+  <div>
+    <h1 className="text-2xl font-bold text-cyan-400">
+      Dashboard Overview
+    </h1>
+    <p className="mt-1 text-slate-400">
+      Monitor daily teacher availability and relief coverage.
+    </p>
+  </div>
 
-        <div>
-          <label
-            htmlFor="dashboard-date"
-            className="mb-2 block text-sm text-slate-300"
-          >
-            Select Date
-          </label>
-          <input
-            id="dashboard-date"
-            type="date"
-            value={date}
-            onChange={(event) => setDate(event.target.value)}
-            className="rounded-lg bg-slate-700 p-3 text-white"
-          />
-        </div>
-      </div>
+  <button
+    type="button"
+    onClick={exportBackup}
+    className="rounded-lg bg-cyan-600 px-4 py-2
+               font-medium text-white hover:bg-cyan-500"
+  >
+    Export Data Backup
+  </button>
 
-      <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
-        {summaryCards.map((card) => (
-          <div
-            key={card.title}
-            className="rounded-xl border border-slate-700 bg-slate-800 p-6"
-          >
-            <p className="text-sm text-slate-400">
-              {card.title}
-            </p>
-            <p
-              className={`mt-3 text-4xl font-bold ${card.color}`}
-            >
-              {card.value}
-            </p>
-          </div>
-        ))}
-      </div>
+  <div>
+    <label
+      htmlFor="dashboard-date"
+      className="mb-2 block text-sm text-slate-300"
+    >
+      Select Date
+    </label>
+    <input
+      id="dashboard-date"
+      type="date"
+      value={date}
+      onChange={(event) => setDate(event.target.value)}
+      className="rounded-lg bg-slate-700 p-3 text-white"
+    />
+  </div>
+</div>
+
+         
+{/* Dashboard Summary Cards */}
+<div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
+  {summaryCards.map((card) => (
+    <div
+      key={card.title}
+      className="rounded-xl border border-slate-700 bg-slate-800 p-6"
+    >
+      <p className="text-sm text-slate-400">
+        {card.title}
+      </p>
+
+      <p className={`mt-3 text-4xl font-bold ${card.color}`}>
+        {card.value}
+      </p>
+    </div>
+  ))}
+</div>
+ 
+      
 
       <div className="grid gap-6 lg:grid-cols-2">
         <div className="rounded-xl bg-slate-800 p-6">

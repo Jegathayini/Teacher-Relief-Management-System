@@ -117,22 +117,54 @@ function Absences() {
     setMessage("Teacher marked absent successfully.")
   }
 
-  function handleRemove(absence: Absence) {
-    const confirmed = window.confirm(
-      "Remove this absence record?"
+  
+function handleRemove(absence: Absence) {
+  setError("")
+  setMessage("")
+
+  // Read the latest assignments from browser storage.
+  const currentAssignments = getReliefAssignments()
+
+  // Check whether any relief assignments depend
+  // on this teacher being absent on this date.
+  const relatedAssignments = currentAssignments.filter(
+    (assignment) =>
+      assignment.date === absence.date &&
+      assignment.absentTeacherId === absence.teacherId
+  )
+
+  // Protect existing relief records.
+  if (relatedAssignments.length > 0) {
+    window.alert(
+      `Cannot remove this absence record.\n\n` +
+      `${relatedAssignments.length} relief assignment(s) ` +
+      `depend on this teacher being absent.\n\n` +
+      `Please open Relief Assignments, select ` +
+      `${absence.date}, and remove the related ` +
+      `assignments first.`
     )
 
-    if (!confirmed) return
-
-    const updated = absences.filter(
-      (item) => item.id !== absence.id
-    )
-
-    setAbsences(updated)
-    saveAbsences(updated)
-    setMessage("Absence record removed.")
-    setError("")
+    return
   }
+
+  const confirmed = window.confirm(
+    `Remove the absence record for ` +
+    `${getTeacherName(absence.teacherId)} ` +
+    `on ${absence.date}?`
+  )
+
+  if (!confirmed) return
+
+  const updatedAbsences = absences.filter(
+    (item) => item.id !== absence.id
+  )
+
+  setAbsences(updatedAbsences)
+  saveAbsences(updatedAbsences)
+
+  setMessage("Absence record removed successfully.")
+}
+
 
   function getAffectedLessons(absentTeacherId: string) {
     return timetables

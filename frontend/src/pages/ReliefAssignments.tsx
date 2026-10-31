@@ -88,83 +88,136 @@ function ReliefAssignments() {
     )
   }
 
-  function handleAssign(
-    entry: TimetableEntry,
-    reliefTeacherId: string
-  ) {
-    setError("")
-    setMessage("")
+  
+function handleAssign(
+  entry: TimetableEntry,
+  reliefTeacherId: string
+) {
+  setError("")
+  setMessage("")
 
-    if (!reliefTeacherId) {
-      setError("Please select a relief teacher.")
-      return
-    }
-
-    if (findAssignment(entry)) {
-      setError("This lesson already has a relief assignment.")
-      return
-    }
-
-    const isStillAbsent = absences.some(
-      (absence) =>
-        absence.date === date &&
-        absence.teacherId === entry.teacherId
-    )
-
-    if (!isStillAbsent) {
-      setError("The original teacher is not marked absent.")
-      return
-    }
-
-    const reliefTeacher = teachers.find(
-      (teacher) => teacher.id === reliefTeacherId
-    )
-
-    if (!reliefTeacher || !reliefTeacher.active) {
-      setError("The selected relief teacher is not active.")
-      return
-    }
-
-    if (reliefTeacherId === entry.teacherId) {
-      setError("A teacher cannot substitute for themselves.")
-      return
-    }
-
-    if (
-      isReliefConflict(
-        reliefTeacherId,
-        date,
-        entry.period,
-        timetables,
-        absences,
-        assignments
-      )
-    ) {
-      setError(
-        "This teacher is absent, teaching, or already assigned relief during this period."
-      )
-      return
-    }
-
-    const newAssignment: ReliefAssignment = {
-      id: crypto.randomUUID(),
-      date,
-      period: entry.period,
-      className: entry.className,
-      absentTeacherId: entry.teacherId,
-      reliefTeacherId,
-      subject: entry.subject
-    }
-
-    const updated = [...assignments, newAssignment]
-
-    setAssignments(updated)
-    saveReliefAssignments(updated)
-
-    setMessage(
-      `${reliefTeacher.name} assigned to ${entry.className}, Period ${entry.period}.`
-    )
+  if (!reliefTeacherId) {
+    setError("Please select a relief teacher.")
+    return
   }
+
+  // Read the latest saved data before validation.
+  const currentTeachers = getTeachers()
+  const currentTimetables = getTimetables()
+  const currentAbsences = getAbsences()
+  const currentAssignments = getReliefAssignments()
+
+  // 1. Verify the original lesson still exists.
+  const lessonExists = currentTimetables.some(
+    (item) =>
+      item.id === entry.id &&
+      item.teacherId === entry.teacherId &&
+      item.className === entry.className &&
+      item.period === entry.period &&
+      item.day === getDayName(date) &&
+      item.subject === entry.subject
+  )
+
+  if (!lessonExists) {
+    setError(
+      "This timetable lesson has changed or been deleted. " +
+      "Refresh the page and try again."
+    )
+    return
+  }
+
+  // 2. Prevent duplicate assignments for the lesson.
+  const alreadyAssigned = currentAssignments.some(
+    (assignment) =>
+      assignment.date === date &&
+      assignment.period === entry.period &&
+      assignment.className.toLowerCase() ===
+        entry.className.toLowerCase() &&
+      assignment.absentTeacherId === entry.teacherId
+  )
+
+  if (alreadyAssigned) {
+    setError("This lesson already has a relief assignment.")
+    return
+  }
+
+  // 3. Verify that the original teacher is absent.
+  const isStillAbsent = currentAbsences.some(
+    (absence) =>
+      absence.date === date &&
+      absence.teacherId === entry.teacherId
+  )
+
+  if (!isStillAbsent) {
+    setError(
+      "The original teacher is no longer marked absent."
+    )
+    return
+  }
+
+  // 4. Check whether the substitute is still active.
+  const reliefTeacher = currentTeachers.find(
+    (teacher) => teacher.id === reliefTeacherId
+  )
+
+  if (!reliefTeacher || !reliefTeacher.active) {
+    setError(
+      "The selected relief teacher is no longer active."
+    )
+    return
+  }
+
+  // 5. A teacher cannot replace themselves.
+  if (reliefTeacherId === entry.teacherId) {
+    setError(
+      "A teacher cannot substitute for themselves."
+    )
+    return
+  }
+
+  // 6. Check for scheduling conflicts.
+  if (
+    isReliefConflict(
+      reliefTeacherId,
+      date,
+      entry.period,
+      currentTimetables,
+      currentAbsences,
+      currentAssignments
+    )
+  ) {
+    setError(
+      "This teacher is absent, teaching, or already " +
+      "assigned relief during this period."
+    )
+    return
+  }
+
+  // 7. Save the validated assignment.
+  const newAssignment: ReliefAssignment = {
+    id: crypto.randomUUID(),
+    date,
+    period: entry.period,
+    className: entry.className,
+    absentTeacherId: entry.teacherId,
+    reliefTeacherId,
+    subject: entry.subject
+  }
+
+  const updated = [
+    ...currentAssignments,
+    newAssignment
+  ]
+
+  setAssignments(updated)
+  saveReliefAssignments(updated)
+
+  setMessage(
+    `${reliefTeacher.name} assigned to ` +
+    `${entry.className}, Period ${entry.period}.`
+  )
+}
+
 
   function handleRemove(assignmentId: string) {
     const confirmed = window.confirm(

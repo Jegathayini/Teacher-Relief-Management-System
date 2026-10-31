@@ -2,7 +2,14 @@
 import { useState } from "react"
 import type { FormEvent } from "react"
 import type { Teacher } from "../types"
-import { getTeachers, saveTeachers } from "../utils/storage"
+
+import {
+  getTeachers,
+  saveTeachers,
+  getTimetables,
+  getAbsences,
+  getReliefAssignments
+} from "../utils/storage"
 
 function Teachers() {
   const [teachers, setTeachers] = useState<Teacher[]>(getTeachers)
@@ -65,27 +72,131 @@ function Teachers() {
     setError("")
   }
 
-  function handleToggleActive(id: string) {
+  
+function handleToggleActive(id: string) {
+  setError("")
+
+  const teacher = teachers.find(
+    (item) => item.id === id
+  )
+
+  if (!teacher) return
+
+  // Reactivating a teacher is allowed.
+  if (!teacher.active) {
     updateTeachers(
-      teachers.map((teacher) =>
-        teacher.id === id
-          ? { ...teacher, active: !teacher.active }
-          : teacher
+      teachers.map((item) =>
+        item.id === id
+          ? { ...item, active: true }
+          : item
       )
     )
+    return
   }
 
-  function handleDelete(id: string) {
-    const confirmed = window.confirm(
-      "Delete this teacher? Existing timetable and relief records may still reference them."
+  // Get today's date in local time.
+  const now = new Date()
+
+  const today = [
+    now.getFullYear(),
+    String(now.getMonth() + 1).padStart(2, "0"),
+    String(now.getDate()).padStart(2, "0")
+  ].join("-")
+
+  // Check current and future relief assignments.
+  const upcomingAssignments =
+    getReliefAssignments().filter(
+      (assignment) =>
+        assignment.reliefTeacherId === id &&
+        assignment.date >= today
     )
 
-    if (!confirmed) return
-
-    updateTeachers(teachers.filter((teacher) => teacher.id !== id))
-
-    if (editingId === id) resetForm()
+  if (upcomingAssignments.length > 0) {
+    window.alert(
+      `Cannot deactivate ${teacher.name}.\n\n` +
+      `${upcomingAssignments.length} current or future ` +
+      `relief assignment(s) depend on this teacher.\n\n` +
+      `Remove or reassign those relief assignments ` +
+      `before deactivating the teacher.`
+    )
+    return
   }
+
+  const confirmed = window.confirm(
+    `Deactivate ${teacher.name}?\n\n` +
+    `This teacher will no longer be available ` +
+    `for new timetable entries or relief suggestions.\n\n` +
+    `Existing timetable and historical records ` +
+    `will be preserved.`
+  )
+
+  if (!confirmed) return
+
+  updateTeachers(
+    teachers.map((item) =>
+      item.id === id
+        ? { ...item, active: false }
+        : item
+    )
+  )
+}
+
+
+  
+function handleDelete(id: string) {
+  setError("")
+
+  const teacher = teachers.find(
+    (item) => item.id === id
+  )
+
+  if (!teacher) return
+
+  const hasTimetable = getTimetables().some(
+    (entry) => entry.teacherId === id
+  )
+
+  const hasAbsences = getAbsences().some(
+    (absence) => absence.teacherId === id
+  )
+
+  const hasReliefAssignments =
+    getReliefAssignments().some(
+      (assignment) =>
+        assignment.absentTeacherId === id ||
+        assignment.reliefTeacherId === id
+    )
+
+  if (
+    hasTimetable ||
+    hasAbsences ||
+    hasReliefAssignments
+  ) {
+    window.alert(
+      `Cannot delete ${teacher.name}.\n\n` +
+      "This teacher has existing timetable, absence, " +
+      "or relief assignment records.\n\n" +
+      "Deactivate the teacher instead, or remove " +
+      "the related records first."
+    )
+    return
+  }
+
+  const confirmed = window.confirm(
+    `Are you sure you want to delete ${teacher.name}?`
+  )
+
+  if (!confirmed) return
+
+  updateTeachers(
+    teachers.filter((item) => item.id !== id)
+  )
+
+  if (editingId === id) {
+    resetForm()
+  }
+}
+
 
   return (
     <section className="space-y-6">
