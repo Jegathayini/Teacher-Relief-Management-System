@@ -1,7 +1,8 @@
 
-import { useState } from "react"
+import { useState, useEffect } from "react"
 import type { FormEvent } from "react"
 import type { Teacher } from "../types"
+import { fetchTeachers } from "../services/api"
 
 import {
   getTeachers,
@@ -17,6 +18,26 @@ function Teachers() {
   const [subjects, setSubjects] = useState("")
   const [editingId, setEditingId] = useState<string | null>(null)
   const [error, setError] = useState("")
+  
+const [databaseTeachers, setDatabaseTeachers] = useState<Teacher[]>([])
+const [databaseStatus, setDatabaseStatus] = useState("Checking database...")
+
+useEffect(() => {
+  async function loadDatabaseTeachers() {
+    try {
+      const data = await fetchTeachers()
+
+      setDatabaseTeachers(data)
+      setDatabaseStatus("Connected to SQLite")
+    } catch (error) {
+      console.error("Failed to load database teachers:", error)
+      setDatabaseStatus("Database connection failed")
+    }
+  }
+
+  void loadDatabaseTeachers()
+}, [])
+
 
   function updateTeachers(updated: Teacher[]) {
     setTeachers(updated)
@@ -207,6 +228,19 @@ function handleDelete(id: string) {
         <p className="mt-1 text-slate-400">
           Add, update and manage school teachers.
         </p>
+        
+<div className="mt-4 flex flex-wrap items-center gap-3">
+  <span className="rounded-lg border border-slate-600 bg-slate-800 px-3 py-2 text-sm text-cyan-400">
+    {databaseStatus}
+  </span>
+
+  {databaseStatus === "Connected to SQLite" && (
+    <span className="rounded-lg border border-slate-600 bg-slate-800 px-3 py-2 text-sm text-slate-300">
+      Teachers in SQLite: {databaseTeachers.length}
+    </span>
+  )}
+</div>
+
       </div>
 
       <form
