@@ -17,3 +17,18 @@ export async function checkBackendHealth(): Promise<HealthResponse> {
 
   return (await response.json()) as HealthResponse
 }
+
+
+import type { Teacher } from "../types"
+
+export async function fetchTeachers(): Promise<Teacher[]> {
+  const response = await fetch(`${API_BASE_URL}/api/teachers`)
+
+  if (!response.ok) {
+    throw new Error(
+      `Failed to fetch teachers: ${response.status}`
+    )
+  }
+
+  return (await response.json()) as Teacher[]
+}

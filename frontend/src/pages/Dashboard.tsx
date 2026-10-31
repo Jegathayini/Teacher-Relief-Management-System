@@ -1,8 +1,9 @@
-import { useEffect } from "react"
-import { checkBackendHealth } from "../services/api"
 
+import { useEffect, useState } from "react"
+
+import { checkBackendHealth } from "../services/api"
 import { exportBackup } from "../utils/backup"
-import { useState } from "react"
+
 import type {
   Teacher,
   TimetableEntry,
@@ -17,7 +18,7 @@ import {
   getReliefAssignments
 } from "../utils/storage"
 
-
+// Get today's date in YYYY-MM-DD format
 function getToday(): string {
   const now = new Date()
 
@@ -28,6 +29,7 @@ function getToday(): string {
   return `${year}-${month}-${day}`
 }
 
+// Convert a selected date into its weekday name
 function getDayName(date: string): string {
   const [year, month, day] = date.split("-").map(Number)
 
@@ -38,33 +40,36 @@ function getDayName(date: string): string {
 }
 
 function Dashboard() {
+  // Existing school data from localStorage
   const [teachers] = useState<Teacher[]>(getTeachers)
   const [timetables] = useState<TimetableEntry[]>(getTimetables)
   const [absences] = useState<Absence[]>(getAbsences)
-  const [assignments] =
-    useState<ReliefAssignment[]>(getReliefAssignments)
+  const [assignments] = useState<ReliefAssignment[]>(
+    getReliefAssignments
+  )
 
   const [date, setDate] = useState(getToday)
-  
-  const [backendStatus, setBackendStatus] = useState(
-  "Checking backend connection..."
-)
 
-useEffect(() => {
-  async function testConnection() {
-    try {
-      const result = await checkBackendHealth()
-      setBackendStatus(result.message)
-    } catch (error) {
-      console.error("Backend connection failed:", error)
-      setBackendStatus("Backend disconnected")
+  // Flask backend connection
+  const [backendStatus, setBackendStatus] = useState<
+    "checking" | "connected" | "disconnected"
+  >("checking")
+
+  useEffect(() => {
+    async function testConnection() {
+      try {
+        await checkBackendHealth()
+        setBackendStatus("connected")
+      } catch (error) {
+        console.error("Backend connection failed:", error)
+        setBackendStatus("disconnected")
+      }
     }
-  }
 
-  void testConnection()
-}, [])
+    void testConnection()
+  }, [])
 
-
+  // Calculate daily statistics
   const dayName = getDayName(date)
 
   const dailyAbsences = absences.filter(
@@ -103,8 +108,10 @@ useEffect(() => {
   ).length
 
   function getTeacherName(id: string): string {
-    return teachers.find((teacher) => teacher.id === id)?.name
-      ?? "Unknown Teacher"
+    return (
+      teachers.find((teacher) => teacher.id === id)?.name ??
+      "Unknown Teacher"
+    )
   }
 
   const summaryCards = [
@@ -131,69 +138,107 @@ useEffect(() => {
   ]
 
   return (
-    <section className="space-y-6">
-      <div className="rounded-lg border border-slate-700 bg-slate-800 p-3 text-sm text-cyan-400">
-  Backend Status: {backendStatus}
-</div>
-<div className="flex flex-wrap items-end justify-between gap-4">
-  <div>
-    <h1 className="text-2xl font-bold text-cyan-400">
-      Dashboard Overview
-    </h1>
-    <p className="mt-1 text-slate-400">
-      Monitor daily teacher availability and relief coverage.
-    </p>
-  </div>
+    <section className="w-full min-w-0 space-y-6">
 
-  <button
-    type="button"
-    onClick={exportBackup}
-    className="rounded-lg bg-cyan-600 px-4 py-2
-               font-medium text-white hover:bg-cyan-500"
-  >
-    Export Data Backup
-  </button>
+      {/* Dashboard Header */}
+      <div className="flex flex-col gap-5 xl:flex-row xl:items-center xl:justify-between">
 
-  <div>
-    <label
-      htmlFor="dashboard-date"
-      className="mb-2 block text-sm text-slate-300"
-    >
-      Select Date
-    </label>
-    <input
-      id="dashboard-date"
-      type="date"
-      value={date}
-      onChange={(event) => setDate(event.target.value)}
-      className="rounded-lg bg-slate-700 p-3 text-white"
-    />
-  </div>
-</div>
+        <div className="min-w-0">
+          <h1 className="text-2xl font-bold text-cyan-400">
+            Dashboard Overview
+          </h1>
 
-         
-{/* Dashboard Summary Cards */}
-<div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
-  {summaryCards.map((card) => (
-    <div
-      key={card.title}
-      className="rounded-xl border border-slate-700 bg-slate-800 p-6"
-    >
-      <p className="text-sm text-slate-400">
-        {card.title}
-      </p>
+          <p className="mt-1 text-sm text-slate-400">
+            Monitor daily teacher availability and relief coverage.
+          </p>
+        </div>
 
-      <p className={`mt-3 text-4xl font-bold ${card.color}`}>
-        {card.value}
-      </p>
-    </div>
-  ))}
-</div>
- 
-      
+        <div className="flex flex-wrap items-end gap-3">
 
+          {/* Backend Connection Indicator */}
+          <div
+            className={`flex items-center gap-2 rounded-lg border px-3 py-2.5 text-sm ${
+              backendStatus === "connected"
+                ? "border-green-800 bg-green-950/40 text-green-400"
+                : backendStatus === "disconnected"
+                  ? "border-red-800 bg-red-950/40 text-red-400"
+                  : "border-slate-700 bg-slate-800 text-slate-400"
+            }`}
+          >
+            <span
+              className={`h-2 w-2 rounded-full ${
+                backendStatus === "connected"
+                  ? "bg-green-400"
+                  : backendStatus === "disconnected"
+                    ? "bg-red-400"
+                    : "bg-amber-400"
+              }`}
+            />
+
+            <span>
+              {backendStatus === "connected"
+                ? "Backend Connected"
+                : backendStatus === "disconnected"
+                  ? "Backend Disconnected"
+                  : "Checking Backend..."}
+            </span>
+          </div>
+
+          {/* Export Backup */}
+          <button
+            type="button"
+            onClick={exportBackup}
+            className="rounded-lg bg-cyan-600 px-4 py-2.5 text-sm font-medium text-white transition hover:bg-cyan-500"
+          >
+            Export Data Backup
+          </button>
+
+          {/* Date Selection */}
+          <div className="ml-auto">
+            <label
+              htmlFor="dashboard-date"
+              className="mb-1 block text-xs text-slate-400"
+            >
+              Select Date
+            </label>
+
+            <input
+              id="dashboard-date"
+              type="date"
+              value={date}
+              onChange={(event) => setDate(event.target.value)}
+              className="rounded-lg border border-slate-600 bg-slate-800 px-3 py-2 text-sm text-white outline-none focus:border-cyan-500"
+            />
+          </div>
+
+        </div>
+      </div>
+
+      {/* Summary Cards */}
+      <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
+        {summaryCards.map((card) => (
+          <div
+            key={card.title}
+            className="rounded-xl border border-slate-700 bg-slate-800 p-5"
+          >
+            <p className="text-sm text-slate-400">
+              {card.title}
+            </p>
+
+            <p
+              className={`mt-3 text-3xl font-bold ${card.color}`}
+            >
+              {card.value}
+            </p>
+          </div>
+        ))}
+      </div>
+
+      {/* Daily Absences and Relief Assignments */}
       <div className="grid gap-6 lg:grid-cols-2">
-        <div className="rounded-xl bg-slate-800 p-6">
+
+        {/* Absent Teachers */}
+        <div className="rounded-xl border border-slate-700 bg-slate-800 p-5">
           <h2 className="mb-4 text-lg font-semibold text-white">
             Absent Teachers — {date}
           </h2>
@@ -212,6 +257,7 @@ useEffect(() => {
                   <p className="font-semibold text-white">
                     {getTeacherName(absence.teacherId)}
                   </p>
+
                   <p className="mt-1 text-sm text-slate-300">
                     {absence.reason || "No reason specified"}
                   </p>
@@ -221,7 +267,8 @@ useEffect(() => {
           )}
         </div>
 
-        <div className="rounded-xl bg-slate-800 p-6">
+        {/* Relief Assignments */}
+        <div className="rounded-xl border border-slate-700 bg-slate-800 p-5">
           <h2 className="mb-4 text-lg font-semibold text-white">
             Relief Assignments — {date}
           </h2>
@@ -240,6 +287,7 @@ useEffect(() => {
                   <p className="font-semibold text-white">
                     {assignment.className} — Period {assignment.period}
                   </p>
+
                   <p className="mt-1 text-sm text-slate-300">
                     {getTeacherName(assignment.reliefTeacherId)}
                     {" "}replaces{" "}
@@ -250,9 +298,11 @@ useEffect(() => {
             </div>
           )}
         </div>
+
       </div>
 
-      <div className="rounded-xl bg-slate-800 p-6">
+      {/* Lessons Needing Relief */}
+      <div className="rounded-xl border border-slate-700 bg-slate-800 p-5">
         <h2 className="mb-4 text-lg font-semibold text-white">
           Lessons Needing Relief
         </h2>
@@ -275,11 +325,14 @@ useEffect(() => {
               </thead>
 
               <tbody>
-                {affectedLessons
+                {[...affectedLessons]
                   .sort((a, b) => a.period - b.period)
                   .map((entry) => {
-                    const assigned = assignedLessons.some(
-                      (lesson) => lesson.id === entry.id
+                    const assigned = dailyAssignments.some(
+                      (assignment) =>
+                        assignment.period === entry.period &&
+                        assignment.className === entry.className &&
+                        assignment.absentTeacherId === entry.teacherId
                     )
 
                     return (
@@ -287,12 +340,22 @@ useEffect(() => {
                         key={entry.id}
                         className="border-b border-slate-700 text-white"
                       >
-                        <td className="p-3">{entry.period}</td>
-                        <td className="p-3">{entry.className}</td>
-                        <td className="p-3">{entry.subject}</td>
+                        <td className="p-3">
+                          {entry.period}
+                        </td>
+
+                        <td className="p-3">
+                          {entry.className}
+                        </td>
+
+                        <td className="p-3">
+                          {entry.subject}
+                        </td>
+
                         <td className="p-3">
                           {getTeacherName(entry.teacherId)}
                         </td>
+
                         <td className="p-3">
                           <span
                             className={
@@ -312,6 +375,7 @@ useEffect(() => {
           </div>
         )}
       </div>
+
     </section>
   )
 }
