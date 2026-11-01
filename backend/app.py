@@ -1,10 +1,13 @@
 from database import (initialize_database, import_teachers,get_connection)
-from flask import Flask, jsonify, request
+from flask import Flask, jsonify, request, send_file
 from flask_cors import CORS
 import json
 import uuid
 import sqlite3
 from datetime import date
+from io import BytesIO
+import os
+import tempfile
 
 app = Flask(__name__)
 @app.get("/")
@@ -332,62 +335,75 @@ def update_teacher(teacher_id):
 @app.patch("/api/teachers/<teacher_id>/status")
 def update_teacher_status(teacher_id):
     data = request.get_json(silent=True)
+    if not isinstance(data, dict) or type(data.get("active")) is not bool:
+        return jsonify({"message": "Active must be true or false"}), 400
 
-    if not isinstance(data, dict):
-        return jsonify({
-            "status": "error",
-            "message": "A valid JSON object is required"
-        }), 400
-
-    active = data.get("active")
-
-    if not isinstance(active, bool):
-        return jsonify({
-            "status": "error",
-            "message": "Active must be true or false"
-        }), 400
-
+    active = data["active"]
     with get_connection() as connection:
+        connection.execute("BEGIN IMMEDIATE")
         teacher = connection.execute(
-            """
-            SELECT id, name, subjects, active
-            FROM teachers
-            WHERE id = ?
-            """,
+            "SELECT id, name, subjects, active FROM teachers WHERE id = ?",
             (teacher_id,)
         ).fetchone()
-
         if teacher is None:
-            return jsonify({
-                "status": "error",
-                "message": "Teacher not found"
-            }), 404
+            return jsonify({"message": "Teacher not found"}), 404
 
         if not active:
-            return jsonify({
-                "status": "error",
-                "message": (
-                    "Deactivation is temporarily disabled "
-                    "until relief assignments are stored "
-                    "and checked in SQLite."
-                )
-            }), 409
+            timetable = connection.execute(
+                "SELECT 1 FROM timetables WHERE teacher_id = ? LIMIT 1",
+                (teacher_id,)
+            ).fetchone()
+            relief = connection.execute("""
+                SELECT 1 FROM relief_assignments
+                WHERE absent_teacher_id = ? OR relief_teacher_id = ?
+                LIMIT 1
+            """, (teacher_id, teacher_id)).fetchone()
+            if timetable or relief:
+                return jsonify({
+                    "message": "Remove the teacher's timetable and relief assignments before deactivating."
+                }), 409
 
         connection.execute(
-            """
-            UPDATE teachers
-            SET active = 1
-            WHERE id = ?
-            """,
-            (teacher_id,)
+            "UPDATE teachers SET active = ? WHERE id = ?",
+            (int(active), teacher_id)
         )
 
     return jsonify({
         "id": teacher["id"],
         "name": teacher["name"],
         "subjects": json.loads(teacher["subjects"]),
-        "active": True
+        "active": active
     }), 200
+
+
+@app.delete("/api/teachers/<teacher_id>")
+def delete_teacher(teacher_id):
+    with get_connection() as connection:
+        connection.execute("BEGIN IMMEDIATE")
+        teacher = connection.execute(
+            "SELECT id FROM teachers WHERE id = ?", (teacher_id,)
+        ).fetchone()
+        if teacher is None:
+            return jsonify({"message": "Teacher not found"}), 404
+
+        dependencies = (
+            ("timetable entries", "SELECT 1 FROM timetables WHERE teacher_id = ? LIMIT 1", (teacher_id,)),
+            ("absence records", "SELECT 1 FROM absences WHERE teacher_id = ? LIMIT 1", (teacher_id,)),
+            ("relief assignments", """SELECT 1 FROM relief_assignments
+                WHERE absent_teacher_id = ? OR relief_teacher_id = ? LIMIT 1""", (teacher_id, teacher_id)),
+        )
+        for label, sql, params in dependencies:
+            if connection.execute(sql, params).fetchone():
+                return jsonify({
+                    "message": f"Cannot delete teacher with linked {label}. Remove those records first."
+                }), 409
+
+        try:
+            connection.execute("DELETE FROM teachers WHERE id = ?", (teacher_id,))
+        except sqlite3.IntegrityError:
+            return jsonify({"message": "Teacher has linked records and cannot be deleted."}), 409
+
+    return jsonify({"message": "Teacher deleted successfully"}), 200
 
 
 @app.post("/api/teachers/import")
@@ -813,6 +829,43 @@ def delete_timetable(entry_id):
         )
 
     return jsonify({"message": "Timetable entry removed successfully"}), 200
+
+
+@app.get("/api/backup/sqlite")
+def download_sqlite_backup():
+    # Development-only endpoint. Production use requires administrator authentication.
+    if request.remote_addr not in ("127.0.0.1", "::1"):
+        return jsonify({"message": "Local access only"}), 403
+
+    temporary_path = None
+    try:
+        # SQLite's backup API produces a consistent snapshot, even if WAL is enabled.
+        with tempfile.NamedTemporaryFile(suffix=".db", delete=False) as temporary:
+            temporary_path = temporary.name
+
+        with get_connection() as source:
+            with sqlite3.connect(temporary_path) as destination:
+                source.backup(destination)
+
+        with open(temporary_path, "rb") as snapshot:
+            backup_bytes = snapshot.read()
+
+        return send_file(
+            BytesIO(backup_bytes),
+            mimetype="application/vnd.sqlite3",
+            as_attachment=True,
+            download_name=f"reliefms-backup-{date.today().isoformat()}.db",
+            max_age=0,
+        )
+    except (sqlite3.Error, OSError):
+        app.logger.exception("Failed to create SQLite backup")
+        return jsonify({"message": "Could not create database backup"}), 500
+    finally:
+        if temporary_path is not None:
+            try:
+                os.unlink(temporary_path)
+            except OSError:
+                app.logger.warning("Could not remove temporary backup file")
 
 
 if __name__ == "__main__":

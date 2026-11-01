@@ -60,7 +60,6 @@ function Teachers() {
     if (saving) return
     setError("")
     setSuccess("")
-
     const cleanName = name.trim()
     const subjectList = [...new Set(subjects.split(",").map((s) => s.trim()).filter(Boolean))]
     if (!cleanName || subjectList.length === 0) {
@@ -71,7 +70,6 @@ function Teachers() {
       setError("Database is unavailable. Please start Flask and reload.")
       return
     }
-
     setSaving(true)
     try {
       const response = await fetch(
@@ -85,9 +83,10 @@ function Teachers() {
         }
       )
       if (!response.ok) throw new Error(await readApiError(response))
+      const wasEditing = editingId !== null
       await refreshTeachers()
       resetForm()
-      setSuccess(editingId ? "Teacher updated in SQLite." : "Teacher added to SQLite.")
+      setSuccess(wasEditing ? "Teacher updated in SQLite." : "Teacher added to SQLite.")
     } catch (err) {
       setError(err instanceof Error ? err.message : "Unable to save teacher.")
     } finally {
@@ -104,8 +103,9 @@ function Teachers() {
     window.scrollTo({ top: 0, behavior: "smooth" })
   }
 
-  async function handleActivate(teacher: Teacher) {
-    if (teacher.active || saving) return
+  async function handleStatusChange(teacher: Teacher, active: boolean) {
+    if (teacher.active === active || saving) return
+    if (!active && !window.confirm(`Deactivate ${teacher.name}? This will prevent new timetable assignments.`)) return
     setError("")
     setSuccess("")
     setSaving(true)
@@ -115,14 +115,36 @@ function Teachers() {
         {
           method: "PATCH",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ active: true })
+          body: JSON.stringify({ active })
         }
       )
       if (!response.ok) throw new Error(await readApiError(response))
       await refreshTeachers()
-      setSuccess(`${teacher.name} activated in SQLite.`)
+      setSuccess(`${teacher.name} ${active ? "activated" : "deactivated"} in SQLite.`)
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Unable to activate teacher.")
+      setError(err instanceof Error ? err.message : "Unable to change teacher status.")
+    } finally {
+      setSaving(false)
+    }
+  }
+
+  async function handleDelete(teacher: Teacher) {
+    if (saving) return
+    if (!window.confirm(`Permanently delete ${teacher.name}? This cannot be undone.`)) return
+    setError("")
+    setSuccess("")
+    setSaving(true)
+    try {
+      const response = await fetch(
+        `${API_BASE_URL}/api/teachers/${encodeURIComponent(teacher.id)}`,
+        { method: "DELETE" }
+      )
+      if (!response.ok) throw new Error(await readApiError(response))
+      await refreshTeachers()
+      if (editingId === teacher.id) resetForm()
+      setSuccess(`${teacher.name} deleted from SQLite.`)
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Unable to delete teacher.")
     } finally {
       setSaving(false)
     }
@@ -134,13 +156,9 @@ function Teachers() {
         <h1 className="text-2xl font-bold text-cyan-400">Teacher Management</h1>
         <p className="mt-1 text-slate-400">Add, update and manage school teachers.</p>
         <div className="mt-4 flex flex-wrap items-center gap-3">
-          <span className="rounded-lg border border-slate-600 bg-slate-800 px-3 py-2 text-sm text-cyan-400">
-            {databaseStatus}
-          </span>
+          <span className="rounded-lg border border-slate-600 bg-slate-800 px-3 py-2 text-sm text-cyan-400">{databaseStatus}</span>
           {databaseStatus === "Connected to SQLite" && (
-            <span className="rounded-lg border border-slate-600 bg-slate-800 px-3 py-2 text-sm text-slate-300">
-              Teachers in SQLite: {teachers.length}
-            </span>
+            <span className="rounded-lg border border-slate-600 bg-slate-800 px-3 py-2 text-sm text-slate-300">Teachers in SQLite: {teachers.length}</span>
           )}
         </div>
       </div>
@@ -195,14 +213,14 @@ function Teachers() {
                   <button type="button" disabled={saving} onClick={() => handleEdit(teacher)}
                     className="rounded-lg bg-blue-600 px-3 py-2 text-sm text-white hover:bg-blue-500 disabled:opacity-50">Edit</button>
                   {teacher.active ? (
-                    <button type="button" disabled title="Deactivation is disabled until related relief records are migrated"
-                      className="cursor-not-allowed rounded-lg bg-slate-600 px-3 py-2 text-sm text-white opacity-50">Deactivate (unavailable)</button>
+                    <button type="button" disabled={saving} onClick={() => { void handleStatusChange(teacher, false) }}
+                      className="rounded-lg bg-slate-600 px-3 py-2 text-sm text-white hover:bg-slate-500 disabled:opacity-50">Deactivate</button>
                   ) : (
-                    <button type="button" disabled={saving} onClick={() => { void handleActivate(teacher) }}
+                    <button type="button" disabled={saving} onClick={() => { void handleStatusChange(teacher, true) }}
                       className="rounded-lg bg-slate-600 px-3 py-2 text-sm text-white hover:bg-slate-500 disabled:opacity-50">Activate</button>
                   )}
-                  <button type="button" disabled title="Database deletion is not yet implemented; linked records must be protected"
-                    className="cursor-not-allowed rounded-lg bg-red-600 px-3 py-2 text-sm text-white opacity-50">Delete (unavailable)</button>
+                  <button type="button" disabled={saving} onClick={() => { void handleDelete(teacher) }}
+                    className="rounded-lg bg-red-600 px-3 py-2 text-sm text-white hover:bg-red-500 disabled:opacity-50">Delete</button>
                 </div>
               </div>
             ))}

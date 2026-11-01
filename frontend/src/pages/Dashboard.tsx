@@ -249,7 +249,7 @@ function Dashboard() {
         {/* Absent Teachers */}
         <div className="rounded-xl border border-slate-700 bg-slate-800 p-5">
           <h2 className="mb-4 text-lg font-semibold text-white">
-            Absent Teachers â€” {date}
+            Absent Teachers — {date}
           </h2>
 
           {dailyAbsences.length === 0 ? (
@@ -279,7 +279,7 @@ function Dashboard() {
         {/* Relief Assignments */}
         <div className="rounded-xl border border-slate-700 bg-slate-800 p-5">
           <h2 className="mb-4 text-lg font-semibold text-white">
-            Relief Assignments â€” {date}
+            Relief Assignments — {date}
           </h2>
 
           {dailyAssignments.length === 0 ? (
@@ -294,7 +294,7 @@ function Dashboard() {
                   className="rounded-lg bg-slate-700 p-4"
                 >
                   <p className="font-semibold text-white">
-                    {assignment.className} â€” Period {assignment.period}
+                    {assignment.className} — Period {assignment.period}
                   </p>
 
                   <p className="mt-1 text-sm text-slate-300">
