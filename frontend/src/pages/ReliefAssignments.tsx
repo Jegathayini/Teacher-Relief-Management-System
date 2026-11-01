@@ -1,5 +1,6 @@
 
-import { useState } from "react"
+import { useEffect, useState } from "react"
+import { fetchTeachers, fetchTimetables, fetchAbsences, fetchReliefAssignments, createReliefAssignment,deleteReliefAssignment } from "../services/api"
 import type {
   Teacher,
   TimetableEntry,
@@ -7,18 +8,8 @@ import type {
   ReliefAssignment
 } from "../types"
 
-import {
-  getTeachers,
-  getTimetables,
-  getAbsences,
-  getReliefAssignments,
-  saveReliefAssignments
-} from "../utils/storage"
 
-import {
-  getReliefSuggestions,
-  isReliefConflict
-} from "../utils/reliefEngine"
+import { getReliefSuggestions } from "../utils/reliefEngine"
 
 function getToday(): string {
   const now = new Date()
@@ -40,16 +31,86 @@ function getDayName(date: string): string {
 }
 
 function ReliefAssignments() {
-  const [teachers] = useState<Teacher[]>(getTeachers)
-  const [timetables] = useState<TimetableEntry[]>(getTimetables)
-  const [absences] = useState<Absence[]>(getAbsences)
+  const [teachers, setTeachers] = useState<Teacher[]>([])
+  const [timetables, setTimetables] = useState<TimetableEntry[]>([])
+  const [absences, setAbsences] = useState<Absence[]>([])
 
-  const [assignments, setAssignments] =
-    useState<ReliefAssignment[]>(getReliefAssignments)
-
+  const [assignments, setAssignments] = useState<ReliefAssignment[]>([])
   const [date, setDate] = useState(getToday)
-  const [message, setMessage] = useState("")
+  const [databaseStatus, setDatabaseStatus] = useState("Loading SQLite data...")
   const [error, setError] = useState("")
+  const [saving, setSaving] = useState(false)
+
+  useEffect(() => {
+    async function loadData() {
+      try {
+        const [
+  loadedTeachers,
+  loadedTimetables,
+  loadedAbsences,
+  loadedAssignments
+] = await Promise.all([
+  fetchTeachers(),
+  fetchTimetables(),
+  fetchAbsences(),
+  fetchReliefAssignments()
+])
+
+setTeachers(loadedTeachers)
+setTimetables(loadedTimetables)
+setAbsences(loadedAbsences)
+setAssignments(loadedAssignments)
+        setDatabaseStatus("Connected to SQLite")
+      } catch (cause) {
+        console.error("Failed to load relief data:", cause)
+        setDatabaseStatus("SQLite connection failed")
+        setError("Could not load teachers, timetables and absences from SQLite.")
+      }
+    }
+    void loadData()
+  }, [])
+  
+async function handleRemoveAssignment(assignmentId: string) {
+  try {
+    setError("")
+
+    await deleteReliefAssignment(assignmentId)
+
+    setAssignments((current) =>
+      current.filter((assignment) => assignment.id !== assignmentId)
+    )
+  } catch (cause) {
+    setError(
+      cause instanceof Error
+        ? cause.message
+        : "Failed to remove relief assignment."
+    )
+  }
+}
+
+  async function handleAssign(entry: TimetableEntry, reliefTeacherId: string) {
+    if (saving) return
+    setSaving(true)
+    setError("")
+    try {
+      await createReliefAssignment({
+        date,
+        period: entry.period,
+        className: entry.className,
+        absentTeacherId: entry.teacherId,
+        reliefTeacherId,
+        subject: entry.subject
+      })
+      // Reload from the database rather than trusting browser state.
+      setAssignments(await fetchReliefAssignments())
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : "Could not save relief assignment.")
+      // Refresh in case the server saved the assignment but the response failed.
+      try { setAssignments(await fetchReliefAssignments()) } catch { /* keep existing data */ }
+    } finally {
+      setSaving(false)
+    }
+  }
 
   const dayName = getDayName(date)
 
@@ -89,154 +150,6 @@ function ReliefAssignments() {
   }
 
   
-function handleAssign(
-  entry: TimetableEntry,
-  reliefTeacherId: string
-) {
-  setError("")
-  setMessage("")
-
-  if (!reliefTeacherId) {
-    setError("Please select a relief teacher.")
-    return
-  }
-
-  // Read the latest saved data before validation.
-  const currentTeachers = getTeachers()
-  const currentTimetables = getTimetables()
-  const currentAbsences = getAbsences()
-  const currentAssignments = getReliefAssignments()
-
-  // 1. Verify the original lesson still exists.
-  const lessonExists = currentTimetables.some(
-    (item) =>
-      item.id === entry.id &&
-      item.teacherId === entry.teacherId &&
-      item.className === entry.className &&
-      item.period === entry.period &&
-      item.day === getDayName(date) &&
-      item.subject === entry.subject
-  )
-
-  if (!lessonExists) {
-    setError(
-      "This timetable lesson has changed or been deleted. " +
-      "Refresh the page and try again."
-    )
-    return
-  }
-
-  // 2. Prevent duplicate assignments for the lesson.
-  const alreadyAssigned = currentAssignments.some(
-    (assignment) =>
-      assignment.date === date &&
-      assignment.period === entry.period &&
-      assignment.className.toLowerCase() ===
-        entry.className.toLowerCase() &&
-      assignment.absentTeacherId === entry.teacherId
-  )
-
-  if (alreadyAssigned) {
-    setError("This lesson already has a relief assignment.")
-    return
-  }
-
-  // 3. Verify that the original teacher is absent.
-  const isStillAbsent = currentAbsences.some(
-    (absence) =>
-      absence.date === date &&
-      absence.teacherId === entry.teacherId
-  )
-
-  if (!isStillAbsent) {
-    setError(
-      "The original teacher is no longer marked absent."
-    )
-    return
-  }
-
-  // 4. Check whether the substitute is still active.
-  const reliefTeacher = currentTeachers.find(
-    (teacher) => teacher.id === reliefTeacherId
-  )
-
-  if (!reliefTeacher || !reliefTeacher.active) {
-    setError(
-      "The selected relief teacher is no longer active."
-    )
-    return
-  }
-
-  // 5. A teacher cannot replace themselves.
-  if (reliefTeacherId === entry.teacherId) {
-    setError(
-      "A teacher cannot substitute for themselves."
-    )
-    return
-  }
-
-  // 6. Check for scheduling conflicts.
-  if (
-    isReliefConflict(
-      reliefTeacherId,
-      date,
-      entry.period,
-      currentTimetables,
-      currentAbsences,
-      currentAssignments
-    )
-  ) {
-    setError(
-      "This teacher is absent, teaching, or already " +
-      "assigned relief during this period."
-    )
-    return
-  }
-
-  // 7. Save the validated assignment.
-  const newAssignment: ReliefAssignment = {
-    id: crypto.randomUUID(),
-    date,
-    period: entry.period,
-    className: entry.className,
-    absentTeacherId: entry.teacherId,
-    reliefTeacherId,
-    subject: entry.subject
-  }
-
-  const updated = [
-    ...currentAssignments,
-    newAssignment
-  ]
-
-  setAssignments(updated)
-  saveReliefAssignments(updated)
-
-  setMessage(
-    `${reliefTeacher.name} assigned to ` +
-    `${entry.className}, Period ${entry.period}.`
-  )
-}
-
-
-  function handleRemove(assignmentId: string) {
-    const confirmed = window.confirm(
-      "Remove this relief assignment?"
-    )
-
-    if (!confirmed) return
-
-    const updated = assignments.filter(
-      (assignment) => assignment.id !== assignmentId
-    )
-
-    setAssignments(updated)
-    saveReliefAssignments(updated)
-
-    setMessage("Relief assignment removed.")
-    setError("")
-  }
-
   const assignedLessons = affectedLessons.filter(
     (entry) => Boolean(findAssignment(entry))
   )
@@ -253,6 +166,12 @@ function handleAssign(
         </h1>
         <p className="mt-1 text-slate-400">
           Find available teachers and assign temporary daily relief.
+        </p>
+        <p className="mt-2 text-sm text-cyan-400" role="status">
+          Database: {databaseStatus}
+        </p>
+        <p className="mt-1 text-sm text-amber-300">
+          Relief assignments are loaded from SQLite. New assignments are saved to the database.
         </p>
       </div>
 
@@ -271,7 +190,6 @@ function handleAssign(
           onChange={(event) => {
             setDate(event.target.value)
             setError("")
-            setMessage("")
           }}
           className="rounded-lg bg-slate-700 p-3 text-white"
         />
@@ -319,24 +237,19 @@ function handleAssign(
         </p>
       )}
 
-      {message && (
-        <p
-          role="status"
-          className="rounded-lg border border-green-800 bg-green-950 p-4 text-green-300"
-        >
-          {message}
-        </p>
-      )}
-
       <div className="space-y-4">
         <h2 className="text-xl font-semibold text-white">
           Lessons Requiring Relief
         </h2>
 
-        {affectedLessons.length === 0 ? (
+        {databaseStatus !== "Connected to SQLite" ? (
+          <div className="rounded-xl bg-slate-800 p-6 text-slate-300">
+            Waiting for SQLite data. Check that Flask is running if this persists.
+          </div>
+        ) : affectedLessons.length === 0 ? (
           <div className="rounded-xl bg-slate-800 p-6 text-slate-300">
             No affected lessons found for this date.
-            Check that absences and weekly timetables have been recorded.
+            Check that absences and weekly timetables have been recorded in SQLite.
           </div>
         ) : (
           affectedLessons.map((entry) => {
@@ -401,15 +314,17 @@ function handleAssign(
                       </p>
                     </div>
 
-                    <button
-                      type="button"
-                      onClick={() =>
-                        handleRemove(existingAssignment.id)
-                      }
-                      className="rounded-lg bg-red-600 px-4 py-2 text-sm text-white hover:bg-red-500"
-                    >
-                      Remove Assignment
-                    </button>
+                    
+<button
+  type="button"
+  onClick={() => {
+    void handleRemoveAssignment(existingAssignment.id)
+  }}
+  className="rounded-lg bg-red-600 px-4 py-2 text-sm font-semibold text-white hover:bg-red-700"
+>
+  Remove Assignment
+</button>
+
                   </div>
                 ) : suggestions.length === 0 ? (
                   <p className="mt-4 rounded-lg bg-slate-700 p-4 text-sm text-amber-300">
@@ -445,15 +360,11 @@ function handleAssign(
 
                         <button
                           type="button"
-                          onClick={() =>
-                            handleAssign(
-                              entry,
-                              suggestion.teacher.id
-                            )
-                          }
-                          className="rounded-lg bg-cyan-500 px-4 py-2 text-sm font-semibold text-slate-950 hover:bg-cyan-400"
+                          disabled={saving}
+                          onClick={() => void handleAssign(entry, suggestion.teacher.id)}
+                          className="rounded-lg bg-cyan-500 px-4 py-2 text-sm font-semibold text-slate-950 disabled:opacity-40 disabled:cursor-not-allowed"
                         >
-                          Assign Relief
+                          {saving ? "Saving..." : "Assign Relief"}
                         </button>
                       </div>
                     ))}

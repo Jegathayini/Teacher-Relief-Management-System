@@ -1,7 +1,6 @@
-
 import { useEffect, useState } from "react"
 
-import { checkBackendHealth } from "../services/api"
+import { fetchTeachers, fetchTimetables, fetchAbsences, fetchReliefAssignments } from "../services/api"
 import { exportBackup } from "../utils/backup"
 
 import type {
@@ -11,12 +10,6 @@ import type {
   ReliefAssignment
 } from "../types"
 
-import {
-  getTeachers,
-  getTimetables,
-  getAbsences,
-  getReliefAssignments
-} from "../utils/storage"
 
 // Get today's date in YYYY-MM-DD format
 function getToday(): string {
@@ -40,36 +33,46 @@ function getDayName(date: string): string {
 }
 
 function Dashboard() {
-  // Existing school data from localStorage
-  const [teachers] = useState<Teacher[]>(getTeachers)
-  const [timetables] = useState<TimetableEntry[]>(getTimetables)
-  const [absences] = useState<Absence[]>(getAbsences)
-  const [assignments] = useState<ReliefAssignment[]>(
-    getReliefAssignments
-  )
-
+  const [teachers, setTeachers] = useState<Teacher[]>([])
+  const [timetables, setTimetables] = useState<TimetableEntry[]>([])
+  const [absences, setAbsences] = useState<Absence[]>([])
+  const [assignments, setAssignments] = useState<ReliefAssignment[]>([])
   const [date, setDate] = useState(getToday)
-
-  // Flask backend connection
+  const [loadError, setLoadError] = useState("")
   const [backendStatus, setBackendStatus] = useState<
     "checking" | "connected" | "disconnected"
   >("checking")
 
   useEffect(() => {
-    async function testConnection() {
+    let cancelled = false
+    async function loadDashboard() {
       try {
-        await checkBackendHealth()
+        const [loadedTeachers, loadedTimetables, loadedAbsences, loadedAssignments] =
+          await Promise.all([
+            fetchTeachers(),
+            fetchTimetables(),
+            fetchAbsences(),
+            fetchReliefAssignments()
+          ])
+        if (cancelled) return
+        setTeachers(loadedTeachers)
+        setTimetables(loadedTimetables)
+        setAbsences(loadedAbsences)
+        setAssignments(loadedAssignments)
         setBackendStatus("connected")
+        setLoadError("")
       } catch (error) {
-        console.error("Backend connection failed:", error)
+        if (cancelled) return
+        console.error("Dashboard SQLite load failed:", error)
         setBackendStatus("disconnected")
+        setLoadError("Could not load dashboard data from SQLite. Check Flask and refresh.")
       }
     }
-
-    void testConnection()
+    void loadDashboard()
+    return () => { cancelled = true }
   }, [])
 
-  // Calculate daily statistics
+  // Calculate daily statistics from SQLite
   const dayName = getDayName(date)
 
   const dailyAbsences = absences.filter(
@@ -184,13 +187,13 @@ function Dashboard() {
             </span>
           </div>
 
-          {/* Export Backup */}
+          {/* Legacy browser backup; does not include SQLite data */}
           <button
             type="button"
             onClick={exportBackup}
             className="rounded-lg bg-cyan-600 px-4 py-2.5 text-sm font-medium text-white transition hover:bg-cyan-500"
           >
-            Export Data Backup
+            Export Legacy Browser Backup
           </button>
 
           {/* Date Selection */}
@@ -213,6 +216,12 @@ function Dashboard() {
 
         </div>
       </div>
+
+      {loadError && (
+        <p role="alert" className="rounded-lg border border-red-800 bg-red-950 p-4 text-red-300">
+          {loadError}
+        </p>
+      )}
 
       {/* Summary Cards */}
       <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
@@ -240,7 +249,7 @@ function Dashboard() {
         {/* Absent Teachers */}
         <div className="rounded-xl border border-slate-700 bg-slate-800 p-5">
           <h2 className="mb-4 text-lg font-semibold text-white">
-            Absent Teachers — {date}
+            Absent Teachers â€” {date}
           </h2>
 
           {dailyAbsences.length === 0 ? (
@@ -270,7 +279,7 @@ function Dashboard() {
         {/* Relief Assignments */}
         <div className="rounded-xl border border-slate-700 bg-slate-800 p-5">
           <h2 className="mb-4 text-lg font-semibold text-white">
-            Relief Assignments — {date}
+            Relief Assignments â€” {date}
           </h2>
 
           {dailyAssignments.length === 0 ? (
@@ -285,7 +294,7 @@ function Dashboard() {
                   className="rounded-lg bg-slate-700 p-4"
                 >
                   <p className="font-semibold text-white">
-                    {assignment.className} — Period {assignment.period}
+                    {assignment.className} â€” Period {assignment.period}
                   </p>
 
                   <p className="mt-1 text-sm text-slate-300">

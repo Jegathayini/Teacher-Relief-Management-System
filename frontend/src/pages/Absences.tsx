@@ -1,5 +1,6 @@
 
-import { useState } from "react"
+import { useState, useEffect } from "react"
+import { fetchTeachers, fetchTimetables, fetchAbsences, createAbsence, fetchReliefAssignments, deleteAbsence } from "../services/api"
 import type { FormEvent } from "react"
 import type {
   Teacher,
@@ -7,15 +8,6 @@ import type {
   Absence,
   ReliefAssignment
 } from "../types"
-import {
-  getTeachers,
-  getTimetables,
-  getAbsences,
-  saveAbsences,
-  getReliefAssignments,
-  saveReliefAssignments
-} from "../utils/storage"
-
 function getToday(): string {
   const now = new Date()
   const year = now.getFullYear()
@@ -35,17 +27,48 @@ function getDayName(date: string): string {
 }
 
 function Absences() {
-  const [teachers] = useState<Teacher[]>(getTeachers)
-  const [timetables] = useState<TimetableEntry[]>(getTimetables)
-  const [absences, setAbsences] = useState<Absence[]>(getAbsences)
-  const [assignments, setAssignments] =
-    useState<ReliefAssignment[]>(getReliefAssignments)
+  const [teachers, setTeachers] = useState<Teacher[]>([])
+  const [timetables, setTimetables] = useState<TimetableEntry[]>([])
+  const [absences, setAbsences] = useState<Absence[]>([])
+  const [databaseStatus, setDatabaseStatus] = useState("Loading SQLite data...")
+  const [assignments, setAssignments] = useState<ReliefAssignment[]>([])
+  const [isDeleting, setIsDeleting] = useState(false)
 
   const [date, setDate] = useState(getToday)
   const [teacherId, setTeacherId] = useState("")
   const [reason, setReason] = useState("")
   const [message, setMessage] = useState("")
   const [error, setError] = useState("")
+  const [isSaving, setIsSaving] = useState(false)
+useEffect(() => {
+  async function loadDatabaseData() {
+    try {
+      const [
+        databaseTeachers,
+        databaseTimetables,
+        databaseAbsences,
+        databaseAssignments
+      ] = await Promise.all([
+        fetchTeachers(),
+        fetchTimetables(),
+        fetchAbsences(),
+        fetchReliefAssignments()
+      ])
+
+      setTeachers(databaseTeachers)
+      setTimetables(databaseTimetables)
+      setAbsences(databaseAbsences)
+      setAssignments(databaseAssignments)
+      setDatabaseStatus("Connected to SQLite")
+    } catch (error) {
+      console.error("Failed to load absence data:", error)
+      setDatabaseStatus("SQLite connection failed")
+    }
+  }
+
+  void loadDatabaseData()
+}, [])
+
 
   const dayName = getDayName(date)
 
@@ -58,111 +81,122 @@ function Absences() {
       ?? "Unknown Teacher"
   }
 
-  function handleSubmit(event: FormEvent<HTMLFormElement>) {
-    event.preventDefault()
-    setError("")
-    setMessage("")
-
-    if (!teacherId) {
-      setError("Please select an absent teacher.")
-      return
-    }
-
-    if (!teachers.some(
-      (teacher) => teacher.id === teacherId && teacher.active
-    )) {
-      setError("Please select an active teacher.")
-      return
-    }
-
-    const alreadyAbsent = absences.some(
-      (absence) =>
-        absence.teacherId === teacherId &&
-        absence.date === date
-    )
-
-    if (alreadyAbsent) {
-      setError("This teacher is already marked absent on this date.")
-      return
-    }
-
-    const newAbsence: Absence = {
-      id: crypto.randomUUID(),
-      teacherId,
-      date,
-      reason: reason.trim()
-    }
-
-    const updated = [...absences, newAbsence]
-    setAbsences(updated)
-    saveAbsences(updated)
-
-    // Remove relief assignments where this teacher
-    // was previously selected as a substitute.
-    const updatedAssignments = assignments.filter(
-      (assignment) =>
-        !(
-          assignment.date === date &&
-          assignment.reliefTeacherId === teacherId
-        )
-    )
-
-    if (updatedAssignments.length !== assignments.length) {
-      setAssignments(updatedAssignments)
-      saveReliefAssignments(updatedAssignments)
-    }
-
-    setTeacherId("")
-    setReason("")
-    setMessage("Teacher marked absent successfully.")
-  }
-
   
-function handleRemove(absence: Absence) {
+async function handleSubmit(event: FormEvent<HTMLFormElement>) {
+  event.preventDefault()
+
+  if (isSaving) return
+
   setError("")
   setMessage("")
 
-  // Read the latest assignments from browser storage.
-  const currentAssignments = getReliefAssignments()
-
-  // Check whether any relief assignments depend
-  // on this teacher being absent on this date.
-  const relatedAssignments = currentAssignments.filter(
-    (assignment) =>
-      assignment.date === absence.date &&
-      assignment.absentTeacherId === absence.teacherId
-  )
-
-  // Protect existing relief records.
-  if (relatedAssignments.length > 0) {
-    window.alert(
-      `Cannot remove this absence record.\n\n` +
-      `${relatedAssignments.length} relief assignment(s) ` +
-      `depend on this teacher being absent.\n\n` +
-      `Please open Relief Assignments, select ` +
-      `${absence.date}, and remove the related ` +
-      `assignments first.`
-    )
-
+  if (databaseStatus !== "Connected to SQLite") {
+    setError("SQLite is not connected.")
     return
   }
 
-  const confirmed = window.confirm(
-    `Remove the absence record for ` +
-    `${getTeacherName(absence.teacherId)} ` +
-    `on ${absence.date}?`
+  if (!teacherId) {
+    setError("Please select an absent teacher.")
+    return
+  }
+
+  const selectedTeacher = teachers.find(
+    (teacher) => teacher.id === teacherId
   )
 
-  if (!confirmed) return
+  if (!selectedTeacher || !selectedTeacher.active) {
+    setError("Please select an active teacher.")
+    return
+  }
 
-  const updatedAbsences = absences.filter(
-    (item) => item.id !== absence.id
+  const alreadyAbsent = absences.some(
+    (absence) =>
+      absence.teacherId === teacherId &&
+      absence.date === date
   )
 
-  setAbsences(updatedAbsences)
-  saveAbsences(updatedAbsences)
+  if (alreadyAbsent) {
+    setError("This teacher is already marked absent on this date.")
+    return
+  }
 
-  setMessage("Absence record removed successfully.")
+  // Check relief assignments currently stored in SQLite.
+  let currentAssignments: ReliefAssignment[]
+  try {
+    currentAssignments = await fetchReliefAssignments()
+    setAssignments(currentAssignments)
+  } catch {
+    setError("Unable to check existing relief assignments. Please try again.")
+    return
+  }
+
+  const affectedAssignments = currentAssignments.filter(
+    (assignment) =>
+      assignment.date === date &&
+      assignment.reliefTeacherId === teacherId
+  )
+
+  // Do not silently invalidate existing relief assignments.
+  if (affectedAssignments.length > 0) {
+    setError(
+      `This teacher has ${affectedAssignments.length} relief assignment(s) ` +
+      `on this date. Remove or reassign them in Relief Assignments first.`
+    )
+    return
+  }
+
+  setIsSaving(true)
+
+  try {
+    const savedAbsence = await createAbsence({
+      teacherId,
+      date,
+      reason: reason.trim()
+    })
+
+    setAbsences((previous) => [...previous, savedAbsence])
+
+    setTeacherId("")
+    setReason("")
+    setMessage("Teacher absence saved to SQLite successfully.")
+  } catch (error) {
+    setError(
+      error instanceof Error
+        ? error.message
+        : "Failed to save teacher absence."
+    )
+  } finally {
+    setIsSaving(false)
+  }
+}
+
+  
+async function handleRemove(absence: Absence) {
+  if (isDeleting) return
+  setError("")
+  setMessage("")
+
+  if (!window.confirm(
+    `Remove the absence record for ${getTeacherName(absence.teacherId)} on ${absence.date}?`
+  )) return
+
+  setIsDeleting(true)
+  try {
+    // The backend rejects deletion if a relief assignment depends on it.
+    await deleteAbsence(absence.id)
+    const [updatedAbsences, updatedAssignments] = await Promise.all([
+      fetchAbsences(), fetchReliefAssignments()
+    ])
+    setAbsences(updatedAbsences)
+    setAssignments(updatedAssignments)
+    setMessage("Absence record removed from SQLite successfully.")
+  } catch (removeError) {
+    setError(removeError instanceof Error ? removeError.message : "Failed to remove absence.")
+    // Refresh in case deletion succeeded but the subsequent reload failed.
+    try { setAbsences(await fetchAbsences()) } catch { /* retain current data */ }
+  } finally {
+    setIsDeleting(false)
+  }
 }
 
 
@@ -210,6 +244,9 @@ function handleRemove(absence: Absence) {
         <p className="mt-1 text-slate-400">
           Record teacher absences and identify lessons needing relief.
         </p>
+        <p className="mt-2 text-sm text-cyan-400">
+  Database: {databaseStatus}
+</p>
       </div>
 
       <div className="grid gap-4 md:grid-cols-3">
@@ -319,11 +356,12 @@ function handleRemove(absence: Absence) {
         )}
 
         <button
-          type="submit"
-          className="rounded-lg bg-cyan-500 px-5 py-3 font-semibold text-slate-950 hover:bg-cyan-400"
-        >
-          Mark Absent
-        </button>
+  type="submit"
+  disabled={isSaving || databaseStatus !== "Connected to SQLite"}
+  className="rounded-lg bg-cyan-500 px-5 py-3 font-semibold text-slate-950 hover:bg-cyan-400 disabled:cursor-not-allowed disabled:opacity-40"
+>
+  {isSaving ? "Saving..." : "Mark Absent"}
+</button>
       </form>
 
       <div className="rounded-xl bg-slate-800 p-6">
@@ -363,9 +401,9 @@ function handleRemove(absence: Absence) {
                     </div>
 
                     <button
-                      type="button"
+                      type="button" disabled={isDeleting || databaseStatus !== "Connected to SQLite"} title="Remove this SQLite absence record"
                       onClick={() => handleRemove(absence)}
-                      className="rounded-lg bg-red-600 px-3 py-2 text-sm text-white hover:bg-red-500"
+                      className="rounded-lg bg-red-600 px-3 py-2 text-sm text-white hover:bg-red-500 disabled:cursor-not-allowed disabled:opacity-40"
                     >
                       Remove Absence
                     </button>

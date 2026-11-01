@@ -1,29 +1,12 @@
-
-import { useState } from "react"
+import { useEffect, useState } from "react"
 import type { FormEvent } from "react"
+import { createTimetable, fetchTimetables, fetchTeachers, deleteTimetable } from "../services/api"
 import type { Teacher, TimetableEntry } from "../types"
-import {
-  getTeachers,
-  getTimetables,
-  saveTimetables,
-  getReliefAssignments
-} from "../utils/storage"
-
-const DAYS = [
-  "Monday",
-  "Tuesday",
-  "Wednesday",
-  "Thursday",
-  "Friday"
-]
-
+const DAYS = ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday"]
 const PERIODS = [1, 2, 3, 4, 5, 6, 7, 8]
 
 function Timetables() {
-  const [teachers] = useState<Teacher[]>(getTeachers)
-  const [entries, setEntries] =
-    useState<TimetableEntry[]>(getTimetables)
-
+  const [teachers, setTeachers] = useState<Teacher[]>([])
   const [teacherId, setTeacherId] = useState("")
   const [className, setClassName] = useState("")
   const [subject, setSubject] = useState("")
@@ -32,31 +15,58 @@ function Timetables() {
   const [filterDay, setFilterDay] = useState("All")
   const [error, setError] = useState("")
   const [success, setSuccess] = useState("")
+  const [databaseEntries, setDatabaseEntries] = useState<TimetableEntry[]>([])
+  const [databaseStatus, setDatabaseStatus] = useState("Checking SQLite...")
+  const [isSaving, setIsSaving] = useState(false)
+  const [deletingId, setDeletingId] = useState<string | null>(null)
+
+  useEffect(() => {
+    async function loadDatabaseData() {
+      try {
+        const [timetables, databaseTeachers] = await Promise.all([
+          fetchTimetables(),
+          fetchTeachers()
+        ])
+        setDatabaseEntries(timetables)
+        setTeachers(databaseTeachers)
+        setDatabaseStatus("Connected to SQLite")
+      } catch (loadError) {
+        console.error("SQLite API error:", loadError)
+        setDatabaseStatus("SQLite connection failed")
+      }
+    }
+
+    void loadDatabaseData()
+  }, [])
+
+  const combinedEntries = databaseEntries
 
   function handleTeacherChange(id: string) {
     setTeacherId(id)
-
     const teacher = teachers.find((item) => item.id === id)
     setSubject(teacher?.subjects[0] ?? "")
   }
 
-  function handleSubmit(event: FormEvent<HTMLFormElement>) {
+  async function handleSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault()
+    if (isSaving) return
     setError("")
     setSuccess("")
 
     const cleanClass = className.trim()
     const cleanSubject = subject.trim()
 
+    if (databaseStatus !== "Connected to SQLite") {
+      setError("Connect to SQLite before adding a timetable entry.")
+      return
+    }
+
     if (!teacherId || !cleanClass || !cleanSubject) {
       setError("Please complete all timetable fields.")
       return
     }
 
-    const selectedTeacher = teachers.find(
-      (teacher) => teacher.id === teacherId
-    )
-
+    const selectedTeacher = teachers.find((teacher) => teacher.id === teacherId)
     if (!selectedTeacher || !selectedTeacher.active) {
       setError("Please select an active teacher.")
       return
@@ -67,7 +77,7 @@ function Timetables() {
       return
     }
 
-    const teacherConflict = entries.some(
+    const teacherConflict = combinedEntries.some(
       (entry) =>
         entry.day === day &&
         entry.period === period &&
@@ -79,11 +89,11 @@ function Timetables() {
       return
     }
 
-    const classConflict = entries.some(
+    const classConflict = combinedEntries.some(
       (entry) =>
         entry.day === day &&
         entry.period === period &&
-        entry.className.toLowerCase() === cleanClass.toLowerCase()
+        entry.className.trim().toLowerCase() === cleanClass.toLowerCase()
     )
 
     if (classConflict) {
@@ -91,106 +101,68 @@ function Timetables() {
       return
     }
 
-    const newEntry: TimetableEntry = {
-      id: crypto.randomUUID(),
-      teacherId,
-      className: cleanClass,
-      subject: cleanSubject,
-      day,
-      period
-    }
-
-    const updated = [...entries, newEntry]
-    setEntries(updated)
-    saveTimetables(updated)
-
-    setClassName("")
-    setSuccess("Timetable entry added successfully.")
-  }
-
-  
-function handleDelete(id: string) {
-  setError("")
-  setSuccess("")
-
-  const entry = entries.find(
-    (item) => item.id === id
-  )
-
-  if (!entry) {
-    setError("Timetable entry not found.")
-    return
-  }
-
-  const assignments = getReliefAssignments()
-
-  const hasRelatedRelief = assignments.some(
-    (assignment) => {
-      const [year, month, day] = assignment.date
-        .split("-")
-        .map(Number)
-
-      const assignmentDay = new Date(
-        year,
-        month - 1,
-        day
-      ).toLocaleDateString("en-US", {
-        weekday: "long"
+    setIsSaving(true)
+    try {
+      const savedEntry = await createTimetable({
+        teacherId,
+        className: cleanClass,
+        subject: cleanSubject,
+        day,
+        period
       })
-
-      return (
-        assignment.absentTeacherId === entry.teacherId &&
-        assignment.className.toLowerCase() ===
-          entry.className.toLowerCase() &&
-        assignment.period === entry.period &&
-        assignmentDay === entry.day
+      // Display the saved row even if the follow-up refresh fails.
+      setDatabaseEntries((previous) => [...previous, savedEntry])
+      try {
+        const updatedEntries = await fetchTimetables()
+        setDatabaseEntries(updatedEntries)
+      } catch (refreshError) {
+        console.error("Timetable refresh failed:", refreshError)
+      }
+      setClassName("")
+      setSuccess("Timetable entry saved to SQLite successfully.")
+    } catch (saveError) {
+      setError(
+        saveError instanceof Error
+          ? saveError.message
+          : "Failed to save timetable entry."
       )
+    } finally {
+      setIsSaving(false)
     }
-  )
-
-  if (hasRelatedRelief) {
-    window.alert(
-      "Cannot delete this timetable entry.\n\n" +
-      "One or more relief assignments are linked " +
-      "to this lesson.\n\n" +
-      "Remove those relief assignments first, " +
-      "then delete the timetable entry."
-    )
-    return
   }
 
-  const confirmed = window.confirm(
-    `Delete ${entry.className}, ` +
-    `${entry.day}, Period ${entry.period}?`
-  )
+  async function handleDelete(id: string) {
+    if (deletingId !== null) return
+    const entry = databaseEntries.find((item) => item.id === id)
+    if (!entry) return
+    setError("")
+    setSuccess("")
 
-  if (!confirmed) return
+    if (!window.confirm(`Delete ${entry.className}, ${entry.day}, Period ${entry.period}?`)) return
 
-  const updated = entries.filter(
-    (item) => item.id !== id
-  )
+    setDeletingId(id)
+    try {
+      // Backend prevents deleting a timetable linked to relief assignments.
+      await deleteTimetable(id)
+      setDatabaseEntries((previous) => previous.filter((item) => item.id !== id))
+      setSuccess("Timetable entry removed from SQLite successfully.")
+      try { setDatabaseEntries(await fetchTimetables()) } catch { /* local state already updated */ }
+    } catch (deleteError) {
+      setError(deleteError instanceof Error ? deleteError.message : "Failed to delete timetable entry.")
+    } finally {
+      setDeletingId(null)
+    }
+  }
 
-  setEntries(updated)
-  saveTimetables(updated)
-
-  setSuccess("Timetable entry deleted successfully.")
-}
-
-
-  const visibleEntries = entries
+  const visibleEntries = combinedEntries
     .filter((entry) => filterDay === "All" || entry.day === filterDay)
     .sort((a, b) => {
-      const dayDifference =
-        DAYS.indexOf(a.day) - DAYS.indexOf(b.day)
-
-      if (dayDifference !== 0) return dayDifference
-
-      return a.period - b.period
+      const dayDifference = DAYS.indexOf(a.day) - DAYS.indexOf(b.day)
+      return dayDifference !== 0 ? dayDifference : a.period - b.period
     })
 
   function getTeacherName(id: string) {
-    return teachers.find((teacher) => teacher.id === id)?.name
-      ?? "Unknown Teacher"
+    return teachers.find((teacher) => teacher.id === id)?.name ?? "Unknown Teacher"
   }
 
   return (
@@ -202,6 +174,19 @@ function handleDelete(id: string) {
         <p className="mt-1 text-slate-400">
           Manage weekly lessons and prevent scheduling conflicts.
         </p>
+        
+<div className="mt-4 flex flex-wrap items-center gap-3">
+  <span className="rounded-lg bg-slate-800 px-3 py-2 text-sm text-cyan-400">
+    {databaseStatus}
+  </span>
+
+  {databaseStatus === "Connected to SQLite" && (
+    <span className="rounded-lg bg-slate-800 px-3 py-2 text-sm text-slate-300">
+      SQLite Timetable Entries: {databaseEntries.length}
+    </span>
+  )}
+</div>
+
       </div>
 
       <form
@@ -209,7 +194,7 @@ function handleDelete(id: string) {
         className="space-y-4 rounded-xl bg-slate-800 p-6"
       >
         <h2 className="text-lg font-semibold text-white">
-          Add Timetable Entry
+          {isSaving ? "Saving..." : "Add Timetable Entry"}
         </h2>
 
         <div className="grid gap-4 md:grid-cols-2">
@@ -319,9 +304,10 @@ function handleDelete(id: string) {
 
         <button
           type="submit"
-          className="rounded-lg bg-cyan-500 px-5 py-3 font-semibold text-slate-950 hover:bg-cyan-400"
+          disabled={isSaving || databaseStatus !== "Connected to SQLite"}
+          className="rounded-lg bg-cyan-500 px-5 py-3 font-semibold text-slate-950 hover:bg-cyan-400 disabled:cursor-not-allowed disabled:opacity-50"
         >
-          Add Timetable Entry
+          {isSaving ? "Saving..." : "Add Timetable Entry"}
         </button>
       </form>
 
@@ -380,7 +366,9 @@ function handleDelete(id: string) {
                       <button
                         type="button"
                         onClick={() => handleDelete(entry.id)}
-                        className="rounded-lg bg-red-600 px-3 py-2 text-xs text-white hover:bg-red-500"
+                        disabled={deletingId !== null || databaseStatus !== "Connected to SQLite"}
+                        title="Delete SQLite timetable entry"
+                        className="rounded-lg bg-red-600 px-3 py-2 text-xs text-white hover:bg-red-500 disabled:cursor-not-allowed disabled:opacity-40"
                       >
                         Delete
                       </button>

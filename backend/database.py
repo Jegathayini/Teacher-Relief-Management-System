@@ -1,6 +1,8 @@
 
+import json
 import sqlite3
 from pathlib import Path
+
 
 DATABASE_PATH = Path(__file__).resolve().parent / "reliefms.db"
 
@@ -14,6 +16,8 @@ def get_connection():
 
 def initialize_database():
     with get_connection() as connection:
+
+        # 1. Teachers table
         connection.execute("""
             CREATE TABLE IF NOT EXISTS teachers (
                 id TEXT PRIMARY KEY,
@@ -24,10 +28,69 @@ def initialize_database():
             )
         """)
 
+        # 2. Timetables table
+        connection.execute("""
+            CREATE TABLE IF NOT EXISTS timetables (
+                id TEXT PRIMARY KEY,
+                teacher_id TEXT NOT NULL,
+                class_name TEXT NOT NULL,
+                subject TEXT NOT NULL,
+                day TEXT NOT NULL,
+                period INTEGER NOT NULL CHECK (period > 0),
+
+                FOREIGN KEY (teacher_id)
+                    REFERENCES teachers(id)
+                    ON DELETE RESTRICT,
+
+                UNIQUE(day, period, class_name),
+                UNIQUE(day, period, teacher_id)
+            )
+        """)
+
+        # 3. Absences table
+        connection.execute("""
+            CREATE TABLE IF NOT EXISTS absences (
+                id TEXT PRIMARY KEY,
+                teacher_id TEXT NOT NULL,
+                date TEXT NOT NULL,
+                reason TEXT NOT NULL DEFAULT '',
+
+                FOREIGN KEY (teacher_id)
+                    REFERENCES teachers(id)
+                    ON DELETE RESTRICT,
+
+                UNIQUE(teacher_id, date)
+            )
+        """)
+
+        # 4. Relief assignments table
+        connection.execute("""
+            CREATE TABLE IF NOT EXISTS relief_assignments (
+                id TEXT PRIMARY KEY,
+                date TEXT NOT NULL,
+                period INTEGER NOT NULL
+                    CHECK (period BETWEEN 1 AND 8),
+                class_name TEXT NOT NULL,
+                absent_teacher_id TEXT NOT NULL,
+                relief_teacher_id TEXT NOT NULL,
+                subject TEXT NOT NULL,
+
+                FOREIGN KEY (absent_teacher_id)
+                    REFERENCES teachers(id)
+                    ON DELETE RESTRICT,
+
+                FOREIGN KEY (relief_teacher_id)
+                    REFERENCES teachers(id)
+                    ON DELETE RESTRICT,
+
+                UNIQUE(date, period, class_name),
+                UNIQUE(date, period, relief_teacher_id),
+
+                CHECK (absent_teacher_id != relief_teacher_id)
+            )
+        """)
+
     print("ReliefMS database initialized successfully")
-
-
-import json
 
 
 def import_teachers(teachers):
