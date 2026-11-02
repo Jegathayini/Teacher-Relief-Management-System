@@ -29,6 +29,33 @@ def initialize_database():
             UNIQUE(grade_id, section)
         )""")
 
+        # Academic-year rollover metadata and read-only timetable archives.
+        connection.execute("""CREATE TABLE IF NOT EXISTS academic_year_state (
+            singleton INTEGER PRIMARY KEY CHECK (singleton = 1),
+            year INTEGER NOT NULL,
+            start_date TEXT NOT NULL
+        )""")
+        connection.execute("""CREATE TABLE IF NOT EXISTS timetable_archives (
+            archive_id TEXT PRIMARY KEY,
+            academic_year INTEGER NOT NULL,
+            entry_id TEXT NOT NULL,
+            teacher_id TEXT NOT NULL,
+            class_name TEXT NOT NULL,
+            subject TEXT NOT NULL,
+            day TEXT NOT NULL,
+            period INTEGER NOT NULL
+        )""")
+        connection.execute("""CREATE TABLE IF NOT EXISTS timetable_progress_archives (
+            academic_year INTEGER NOT NULL,
+            teacher_id TEXT NOT NULL,
+            day TEXT NOT NULL,
+            period INTEGER NOT NULL,
+            status TEXT NOT NULL,
+            PRIMARY KEY (academic_year, teacher_id, day, period)
+        )""")
+        connection.execute("""INSERT OR IGNORE INTO academic_year_state
+            (singleton, year, start_date) VALUES (1, 2026, '2026-01-01')""")
+
         # 1. Teachers table
         connection.execute("""
             CREATE TABLE IF NOT EXISTS teachers (

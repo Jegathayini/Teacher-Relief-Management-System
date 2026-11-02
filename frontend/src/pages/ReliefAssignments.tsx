@@ -347,8 +347,7 @@ async function handleRemoveAssignment(assignmentId: string) {
                           </p>
 
                           <p className="mt-1 text-xs text-slate-300">
-                            {suggestion.reliefCount} relief assignment(s)
-                            on this date
+                            {suggestion.totalReliefCount} total · {suggestion.reliefCount} today relief assignments
                           </p>
 
                           {suggestion.subjectMatch && (

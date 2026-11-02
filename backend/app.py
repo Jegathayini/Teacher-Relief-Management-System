@@ -118,6 +118,76 @@ def create_teacher():
     return jsonify(teacher), 201
 
 
+@app.get("/api/academic-year")
+def academic_year_status():
+    with get_connection() as conn:
+        state = conn.execute("SELECT year, start_date FROM academic_year_state WHERE singleton=1").fetchone()
+        count = conn.execute("SELECT COUNT(*) AS total FROM timetables").fetchone()["total"]
+        free_count = conn.execute("SELECT COUNT(*) AS total FROM timetable_progress").fetchone()["total"]
+        archived = conn.execute("SELECT COUNT(DISTINCT academic_year) AS total FROM timetable_archives").fetchone()["total"]
+    return jsonify({"year": state["year"], "startDate": state["start_date"],
+                    "timetableCount": count, "progressCount": free_count, "archivedYears": archived})
+
+
+@app.post("/api/academic-year/rollover")
+def rollover_academic_year():
+    # LOCAL DEVELOPMENT ONLY. Before network deployment, require authenticated admin role.
+    if request.remote_addr not in ("127.0.0.1", "::1"):
+        return jsonify({"message": "Local access only; admin authentication is required for deployment."}), 403
+    payload = request.get_json(silent=True)
+    if not isinstance(payload, dict):
+        return jsonify({"message": "Invalid request."}), 400
+    year, start = payload.get("newYear"), payload.get("startDate")
+    if type(year) is not int or not 2000 <= year <= 2200:
+        return jsonify({"message": "Enter a valid new academic year."}), 400
+    try:
+        start_day = date.fromisoformat(start)
+        if start_day.isoformat() != start:
+            raise ValueError()
+    except (TypeError, ValueError):
+        return jsonify({"message": "Enter a valid start date (YYYY-MM-DD)."}), 400
+    if start_day < date.today():
+        return jsonify({"message": "Start date cannot be in the past."}), 400
+    if payload.get("confirmation") != f"RESET {year}":
+        return jsonify({"message": f"Type RESET {year} to confirm."}), 400
+    # Create a durable SQLite snapshot before any destructive operation.
+    # The reset is aborted if a backup cannot be written.
+    try:
+        from pathlib import Path
+        from datetime import datetime
+        backup_dir = Path(__file__).resolve().parent / "backups"
+        backup_dir.mkdir(parents=True, exist_ok=True)
+        backup_path = backup_dir / f"before-rollover-{datetime.now().strftime('%Y%m%d-%H%M%S-%f')}.db"
+        with get_connection() as source, sqlite3.connect(backup_path) as target:
+            source.backup(target)
+    except (OSError, sqlite3.Error):
+        app.logger.exception("Could not create rollover backup")
+        return jsonify({"message": "Backup failed; no timetables were cleared."}), 500
+    try:
+        with get_connection() as conn:
+            conn.execute("BEGIN IMMEDIATE")
+            state = conn.execute("SELECT year, start_date FROM academic_year_state WHERE singleton=1").fetchone()
+            if year <= state["year"] or start <= state["start_date"]:
+                return jsonify({"message": "New year and start date must be later than the current ones."}), 409
+            # Historical assignments must belong to the old period, not the upcoming year.
+            if conn.execute("SELECT 1 FROM relief_assignments WHERE date >= ? LIMIT 1", (start,)).fetchone():
+                return jsonify({"message": "Relief assignments exist on or after the new start date. Choose a later start date."}), 409
+            conn.execute("""INSERT INTO timetable_archives
+                (archive_id, academic_year, entry_id, teacher_id, class_name, subject, day, period)
+                SELECT lower(hex(randomblob(16))), ?, id, teacher_id, class_name, subject, day, period
+                FROM timetables""", (state["year"],))
+            conn.execute("""INSERT INTO timetable_progress_archives
+                (academic_year, teacher_id, day, period, status)
+                SELECT ?, teacher_id, day, period, status FROM timetable_progress""", (state["year"],))
+            conn.execute("DELETE FROM timetable_progress")
+            conn.execute("DELETE FROM timetables")
+            conn.execute("UPDATE academic_year_state SET year=?, start_date=? WHERE singleton=1", (year, start))
+    except sqlite3.Error:
+        app.logger.exception("Academic year rollover failed")
+        return jsonify({"message": "Rollover failed; no changes committed."}), 500
+    return jsonify({"message": "Timetables archived and reset. Relief history preserved.", "year": year, "backupFile": str(backup_path.name)})
+
+
 @app.get("/api/timetables")
 def get_timetables():
     with get_connection() as connection:
@@ -1008,6 +1078,11 @@ def delete_relief_assignment(assignment_id):
 
 @app.delete("/api/absences/<absence_id>")
 def delete_absence(absence_id):
+    with get_connection() as check_conn:
+        year_start = check_conn.execute("SELECT start_date FROM academic_year_state WHERE singleton=1").fetchone()["start_date"]
+    if assignment_date < year_start:
+        return jsonify({"message": "Cannot create relief for a date before the current academic year."}), 409
+
     with get_connection() as connection:
         connection.execute("BEGIN IMMEDIATE")
 
@@ -1174,7 +1249,7 @@ def remove_school_class(class_id):
         if not item:
             return jsonify({"message":"Class not found."}), 404
         name = item["grade_name"] + item["section"]
-        for table in ("timetables", "relief_assignments"):
+        for table in ("timetables", "relief_assignments", "timetable_archives"):
             used = conn.execute(f"SELECT 1 FROM {table} WHERE class_name = ? COLLATE NOCASE LIMIT 1", (name,)).fetchone()
             if used:
                 return jsonify({"message":"This class is used in existing lessons or relief assignments."}), 409

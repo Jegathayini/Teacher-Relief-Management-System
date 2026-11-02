@@ -1,7 +1,8 @@
+import AcademicYearManager from "../components/AcademicYearManager"
 import GradeClassManager from "../components/GradeClassManager"
 import { useEffect, useState } from "react"
 
-import { fetchTeachers, fetchTimetables, fetchAbsences, fetchReliefAssignments } from "../services/api"
+import { fetchTeachers, fetchTimetables, fetchAbsences, fetchReliefAssignments, fetchAcademicYear } from "../services/api"
 import { exportBackup } from "../utils/backup"
 
 import type {
@@ -39,6 +40,7 @@ function Dashboard() {
   const [absences, setAbsences] = useState<Absence[]>([])
   const [assignments, setAssignments] = useState<ReliefAssignment[]>([])
   const [date, setDate] = useState(getToday)
+  const [academicStart, setAcademicStart] = useState("2026-01-01")
   const [loadError, setLoadError] = useState("")
   const [backendStatus, setBackendStatus] = useState<
     "checking" | "connected" | "disconnected"
@@ -48,18 +50,20 @@ function Dashboard() {
     let cancelled = false
     async function loadDashboard() {
       try {
-        const [loadedTeachers, loadedTimetables, loadedAbsences, loadedAssignments] =
+        const [loadedTeachers, loadedTimetables, loadedAbsences, loadedAssignments, yearInfo] =
           await Promise.all([
             fetchTeachers(),
             fetchTimetables(),
             fetchAbsences(),
-            fetchReliefAssignments()
+            fetchReliefAssignments(),
+            fetchAcademicYear()
           ])
         if (cancelled) return
         setTeachers(loadedTeachers)
         setTimetables(loadedTimetables)
         setAbsences(loadedAbsences)
         setAssignments(loadedAssignments)
+        setAcademicStart(yearInfo.startDate)
         setBackendStatus("connected")
         setLoadError("")
       } catch (error) {
@@ -88,7 +92,7 @@ function Dashboard() {
     dailyAbsences.map((absence) => absence.teacherId)
   )
 
-  const affectedLessons = timetables.filter(
+  const affectedLessons = (date >= academicStart ? timetables : []).filter(
     (entry) =>
       entry.day === dayName &&
       absentIds.has(entry.teacherId)
@@ -245,6 +249,11 @@ function Dashboard() {
       </div>
 
       <GradeClassManager />
+      <AcademicYearManager onReset={async () => {
+        const [updatedTimetables, yearInfo] = await Promise.all([fetchTimetables(), fetchAcademicYear()])
+        setTimetables(updatedTimetables)
+        setAcademicStart(yearInfo.startDate)
+      }} />
 
       {/* Daily Absences and Relief Assignments */}
       <div className="grid gap-6 lg:grid-cols-2">

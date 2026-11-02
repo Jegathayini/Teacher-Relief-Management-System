@@ -9,6 +9,7 @@ import type {
 export type ReliefSuggestion = {
   teacher: Teacher
   reliefCount: number
+  totalReliefCount: number
   subjectMatch: boolean
 }
 
@@ -83,6 +84,12 @@ export function getReliefSuggestions(
           assignment.reliefTeacherId === teacher.id
       ).length
 
+      // Lifetime total is calculated across ALL dates, including previous years.
+      // The academic-year rollover preserves these assignment records in SQLite.
+      const totalReliefCount = assignments.filter(
+        (assignment) => assignment.reliefTeacherId === teacher.id
+      ).length
+
       const subjectMatch = teacher.subjects.some(
         (subject) =>
           subject.toLowerCase() ===
@@ -92,6 +99,7 @@ export function getReliefSuggestions(
       return {
         teacher,
         reliefCount,
+        totalReliefCount,
         subjectMatch
       }
     })
@@ -99,6 +107,11 @@ export function getReliefSuggestions(
       // Prefer teachers with fewer relief assignments
       if (a.reliefCount !== b.reliefCount) {
         return a.reliefCount - b.reliefCount
+      }
+
+      // On equal daily workload, favor the teacher with fewer lifetime assignments.
+      if (a.totalReliefCount !== b.totalReliefCount) {
+        return a.totalReliefCount - b.totalReliefCount
       }
 
       // Then prefer teachers who teach the same subject

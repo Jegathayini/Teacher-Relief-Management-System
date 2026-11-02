@@ -259,3 +259,27 @@ export const createGrade = (name: string) => schoolRequest<SchoolGrade>("/api/gr
 export const createSchoolClass = (gradeId: string, section: string) => schoolRequest<SchoolClass>("/api/school-classes", { method: "POST", body: JSON.stringify({ gradeId, section }) })
 export const deleteSchoolClass = (id: string) => schoolRequest<{ message: string }>(`/api/school-classes/${encodeURIComponent(id)}`, { method: "DELETE" })
 export const deleteGrade = (id: string) => schoolRequest<{ message: string }>(`/api/grades/${encodeURIComponent(id)}`, { method: "DELETE" })
+
+export type AcademicYearStatus = {
+  year: number
+  startDate: string
+  timetableCount: number
+  progressCount: number
+  archivedYears: number
+}
+
+export async function fetchAcademicYear(): Promise<AcademicYearStatus> {
+  const response = await fetch(`${API_BASE_URL}/api/academic-year`)
+  if (!response.ok) throw new Error("Could not load academic year settings.")
+  return response.json() as Promise<AcademicYearStatus>
+}
+
+export async function rolloverAcademicYear(newYear: number, startDate: string, confirmation: string): Promise<void> {
+  const response = await fetch(`${API_BASE_URL}/api/academic-year/rollover`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ newYear, startDate, confirmation })
+  })
+  const result = await response.json()
+  if (!response.ok) throw new Error(result.message || "Academic year rollover failed.")
+}
