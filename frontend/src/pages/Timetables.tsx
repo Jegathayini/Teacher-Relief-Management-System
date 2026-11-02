@@ -1,3 +1,5 @@
+import { fetchSchoolConfiguration } from "../services/api"
+import type { SchoolClass } from "../services/api"
 
 import { useEffect, useState, useRef } from "react"
 import type { FormEvent } from "react"
@@ -28,6 +30,7 @@ function Timetables() {
   // Database state
   const [teachers, setTeachers] = useState<Teacher[]>([])
   const [databaseEntries, setDatabaseEntries] = useState<TimetableEntry[]>([])
+  const [schoolClasses, setSchoolClasses] = useState<SchoolClass[]>([])
   const [databaseStatus, setDatabaseStatus] = useState("Checking SQLite...")
 
   // Selected teacher
@@ -60,13 +63,15 @@ const progressRequestId = useRef(0)
   useEffect(() => {
     async function loadDatabaseData() {
       try {
-        const [timetables, databaseTeachers] = await Promise.all([
+        const [timetables, databaseTeachers, configuration] = await Promise.all([
           fetchTimetables(),
           fetchTeachers(),
+          fetchSchoolConfiguration(),
         ])
 
         setDatabaseEntries(timetables)
         setTeachers(databaseTeachers)
+        setSchoolClasses(configuration.classes)
         setDatabaseStatus("Connected to SQLite")
       } catch (loadError) {
         console.error("SQLite API error:", loadError)
@@ -91,6 +96,10 @@ const currentLesson = databaseEntries.find(
     entry.day === currentDay &&
     entry.period === currentPeriod
 )
+  const availableClassNames = Array.from(new Set([
+    ...schoolClasses.map(item => item.name),
+    ...databaseEntries.map(item => item.className),
+  ])).sort((a, b) => a.localeCompare(b, undefined, { numeric: true }))
   const activeTeachers = teachers.filter((teacher) => teacher.active)
 
   const selectedTeacher = teachers.find(
@@ -732,16 +741,15 @@ const currentLesson = databaseEntries.find(
                   Class
                 </label>
 
-                <input
+                <select
                   id="wizard-class"
-                  type="text"
                   value={wizardClass}
-                  onChange={(event) =>
-                    setWizardClass(event.target.value)
-                  }
-                  placeholder="e.g. Grade 8A"
+                  onChange={(event) => setWizardClass(event.target.value)}
                   className="w-full rounded-lg bg-slate-700 p-3 text-white"
-                />
+                >
+                  <option value="">Choose a class</option>
+                  {availableClassNames.map(name => <option key={name} value={name}>{name}</option>)}
+                </select>
               </div>
 
               {/* Save Lesson Button */}
@@ -839,16 +847,15 @@ const currentLesson = databaseEntries.find(
               Class
             </label>
 
-            <input
+            <select
               id="manual-class"
-              type="text"
               value={className}
-              onChange={(event) =>
-                setClassName(event.target.value)
-              }
-              placeholder="e.g. Grade 8A"
+              onChange={(event) => setClassName(event.target.value)}
               className="w-full rounded-lg bg-slate-700 p-3 text-white"
-            />
+            >
+              <option value="">Choose a class</option>
+              {availableClassNames.map(name => <option key={name} value={name}>{name}</option>)}
+            </select>
           </div>
 
           <div>

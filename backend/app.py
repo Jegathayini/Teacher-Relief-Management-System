@@ -1120,6 +1120,79 @@ def download_sqlite_backup():
                 app.logger.warning("Could not remove temporary backup file")
 
 
+# School grade and division management
+@app.get("/api/grades")
+def list_grades():
+    with get_connection() as conn:
+        grades = conn.execute("SELECT id, name FROM grades ORDER BY name COLLATE NOCASE").fetchall()
+        classes = conn.execute("""SELECT c.id, c.grade_id, c.section, g.name AS grade_name
+            FROM school_classes c JOIN grades g ON g.id = c.grade_id
+            ORDER BY g.name COLLATE NOCASE, c.section COLLATE NOCASE""").fetchall()
+    return jsonify({"grades": [dict(r) for r in grades],
+                    "classes": [{"id":r["id"], "gradeId":r["grade_id"],
+                                 "section":r["section"], "name":f'{r["grade_name"]}{r["section"]}'} for r in classes]})
+
+@app.post("/api/grades")
+def add_grade():
+    data = request.get_json(silent=True) or {}
+    name = data.get("name", "")
+    if not isinstance(name, str) or not name.strip() or len(name.strip()) > 60:
+        return jsonify({"message":"Enter a valid grade name (maximum 60 characters)."}), 400
+    name = name.strip()
+    row_id = str(uuid.uuid4())
+    try:
+        with get_connection() as conn:
+            conn.execute("INSERT INTO grades (id, name) VALUES (?, ?)", (row_id, name))
+    except sqlite3.IntegrityError:
+        return jsonify({"message":"This grade already exists."}), 409
+    return jsonify({"id":row_id,"name":name}), 201
+
+@app.post("/api/school-classes")
+def add_school_class():
+    data = request.get_json(silent=True) or {}
+    grade_id, section = data.get("gradeId"), data.get("section")
+    if not isinstance(grade_id, str) or not isinstance(section, str) or not section.strip() or len(section.strip()) > 20:
+        return jsonify({"message":"Select a grade and enter a valid division (maximum 20 characters)."}), 400
+    section = section.strip().upper()
+    row_id = str(uuid.uuid4())
+    with get_connection() as conn:
+        grade = conn.execute("SELECT name FROM grades WHERE id=?", (grade_id,)).fetchone()
+        if not grade:
+            return jsonify({"message":"Grade not found."}), 404
+        try:
+            conn.execute("INSERT INTO school_classes (id, grade_id, section) VALUES (?,?,?)", (row_id, grade_id, section))
+        except sqlite3.IntegrityError:
+            return jsonify({"message":"This class already exists in the grade."}), 409
+    return jsonify({"id":row_id,"gradeId":grade_id,"section":section,"name":grade["name"]+section}), 201
+
+@app.delete("/api/school-classes/<class_id>")
+def remove_school_class(class_id):
+    with get_connection() as conn:
+        conn.execute("BEGIN IMMEDIATE")
+        item = conn.execute("""SELECT c.id, c.section, g.name AS grade_name
+            FROM school_classes c JOIN grades g ON g.id=c.grade_id WHERE c.id=?""", (class_id,)).fetchone()
+        if not item:
+            return jsonify({"message":"Class not found."}), 404
+        name = item["grade_name"] + item["section"]
+        for table in ("timetables", "relief_assignments"):
+            used = conn.execute(f"SELECT 1 FROM {table} WHERE class_name = ? COLLATE NOCASE LIMIT 1", (name,)).fetchone()
+            if used:
+                return jsonify({"message":"This class is used in existing lessons or relief assignments."}), 409
+        conn.execute("DELETE FROM school_classes WHERE id=?", (class_id,))
+    return jsonify({"message":"Class deleted."})
+
+@app.delete("/api/grades/<grade_id>")
+def remove_grade(grade_id):
+    with get_connection() as conn:
+        conn.execute("BEGIN IMMEDIATE")
+        grade = conn.execute("SELECT name FROM grades WHERE id=?", (grade_id,)).fetchone()
+        if not grade:
+            return jsonify({"message":"Grade not found."}), 404
+        if conn.execute("SELECT 1 FROM school_classes WHERE grade_id=? LIMIT 1", (grade_id,)).fetchone():
+            return jsonify({"message":"Remove this grade's classes first."}), 409
+        conn.execute("DELETE FROM grades WHERE id=?", (grade_id,))
+    return jsonify({"message":"Grade deleted."})
+
 if __name__ == "__main__":
     initialize_database()
     app.run(host="127.0.0.1", port=5000, debug=True)

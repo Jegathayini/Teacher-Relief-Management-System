@@ -17,6 +17,18 @@ def get_connection():
 def initialize_database():
     with get_connection() as connection:
 
+        # Configurable school grades and their divisions
+        connection.execute("""CREATE TABLE IF NOT EXISTS grades (
+            id TEXT PRIMARY KEY,
+            name TEXT NOT NULL UNIQUE COLLATE NOCASE
+        )""")
+        connection.execute("""CREATE TABLE IF NOT EXISTS school_classes (
+            id TEXT PRIMARY KEY,
+            grade_id TEXT NOT NULL REFERENCES grades(id) ON DELETE RESTRICT,
+            section TEXT NOT NULL COLLATE NOCASE,
+            UNIQUE(grade_id, section)
+        )""")
+
         # 1. Teachers table
         connection.execute("""
             CREATE TABLE IF NOT EXISTS teachers (

@@ -1,3 +1,4 @@
+import GradeClassManager from "../components/GradeClassManager"
 import { useEffect, useState } from "react"
 
 import { fetchTeachers, fetchTimetables, fetchAbsences, fetchReliefAssignments } from "../services/api"
@@ -242,6 +243,8 @@ function Dashboard() {
           </div>
         ))}
       </div>
+
+      <GradeClassManager />
 
       {/* Daily Absences and Relief Assignments */}
       <div className="grid gap-6 lg:grid-cols-2">

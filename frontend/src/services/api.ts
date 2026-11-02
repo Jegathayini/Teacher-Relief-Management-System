@@ -239,3 +239,23 @@ export async function fetchTimetableProgress(
 
   return response.json()
 }
+
+// School grade and class configuration
+export type SchoolGrade = { id: string; name: string }
+export type SchoolClass = { id: string; gradeId: string; section: string; name: string }
+export type SchoolConfiguration = { grades: SchoolGrade[]; classes: SchoolClass[] }
+
+async function schoolRequest<T>(path: string, options?: RequestInit): Promise<T> {
+  const response = await fetch(`${API_BASE_URL}${path}`, {
+    ...options,
+    headers: { "Content-Type": "application/json", ...options?.headers },
+  })
+  const data = await response.json()
+  if (!response.ok) throw new Error(data.message ?? `Request failed: ${response.status}`)
+  return data as T
+}
+export const fetchSchoolConfiguration = () => schoolRequest<SchoolConfiguration>("/api/grades")
+export const createGrade = (name: string) => schoolRequest<SchoolGrade>("/api/grades", { method: "POST", body: JSON.stringify({ name }) })
+export const createSchoolClass = (gradeId: string, section: string) => schoolRequest<SchoolClass>("/api/school-classes", { method: "POST", body: JSON.stringify({ gradeId, section }) })
+export const deleteSchoolClass = (id: string) => schoolRequest<{ message: string }>(`/api/school-classes/${encodeURIComponent(id)}`, { method: "DELETE" })
+export const deleteGrade = (id: string) => schoolRequest<{ message: string }>(`/api/grades/${encodeURIComponent(id)}`, { method: "DELETE" })
