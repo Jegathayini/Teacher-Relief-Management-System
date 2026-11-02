@@ -148,6 +148,123 @@ def get_timetables():
     return jsonify(timetables), 200
 
 
+@app.get("/api/timetable-progress/<teacher_id>")
+def get_timetable_progress(teacher_id):
+    with get_connection() as connection:
+        teacher = connection.execute(
+            "SELECT id FROM teachers WHERE id = ?",
+            (teacher_id,)
+        ).fetchone()
+
+        if teacher is None:
+            return jsonify({
+                "message": "Teacher not found"
+            }), 404
+
+        rows = connection.execute("""
+            SELECT day, period, status
+            FROM timetable_progress
+            WHERE teacher_id = ?
+              AND NOT EXISTS (
+                SELECT 1 FROM timetables t
+                WHERE t.teacher_id = timetable_progress.teacher_id
+                  AND t.day = timetable_progress.day
+                  AND t.period = timetable_progress.period
+              )
+            UNION ALL
+            SELECT day, period, 'LESSON' AS status
+            FROM timetables WHERE teacher_id = ?
+        """, (teacher_id, teacher_id)).fetchall()
+
+        progress = [
+            {
+                "day": row["day"],
+                "period": row["period"],
+                "status": row["status"]
+            }
+            for row in rows
+        ]
+
+    return jsonify(progress), 200
+
+
+@app.put("/api/timetable-progress/free")
+def save_free_period():
+    data = request.get_json(silent=True)
+
+    if not isinstance(data, dict):
+        return jsonify({
+            "message": "A valid JSON object is required"
+        }), 400
+
+    teacher_id = data.get("teacherId")
+    day = data.get("day")
+    period = data.get("period")
+
+    if not isinstance(teacher_id, str) or not teacher_id.strip():
+        return jsonify({"message": "Teacher is required"}), 400
+
+    if day not in {
+        "Monday", "Tuesday", "Wednesday",
+        "Thursday", "Friday"
+    }:
+        return jsonify({"message": "Invalid school day"}), 400
+
+    if type(period) is not int or not 1 <= period <= 8:
+        return jsonify({
+            "message": "Period must be between 1 and 8"
+        }), 400
+
+    teacher_id = teacher_id.strip()
+
+    with get_connection() as connection:
+        connection.execute("BEGIN IMMEDIATE")
+
+        teacher = connection.execute("""
+            SELECT id, active
+            FROM teachers
+            WHERE id = ?
+        """, (teacher_id,)).fetchone()
+
+        if teacher is None:
+            return jsonify({"message": "Teacher not found"}), 404
+
+        if not teacher["active"]:
+            return jsonify({
+                "message": "Teacher is inactive"
+            }), 409
+
+        existing_lesson = connection.execute("""
+            SELECT id
+            FROM timetables
+            WHERE teacher_id = ?
+              AND day = ?
+              AND period = ?
+        """, (teacher_id, day, period)).fetchone()
+
+        if existing_lesson:
+            return jsonify({
+                "message": "This period already has a lesson. Edit the lesson before marking it free."
+            }), 409
+
+        connection.execute("""
+            INSERT INTO timetable_progress
+                (teacher_id, day, period, status)
+            VALUES (?, ?, ?, 'FREE')
+            ON CONFLICT(teacher_id, day, period)
+            DO UPDATE SET status = 'FREE'
+        """, (teacher_id, day, period))
+
+    return jsonify({
+        "teacherId": teacher_id,
+        "day": day,
+        "period": period,
+        "status": "FREE",
+        "message": "Free period saved successfully"
+    }), 200
+
+
+
 @app.post("/api/timetables")
 def create_timetable():
     data = request.get_json(silent=True)
@@ -259,7 +376,138 @@ def create_timetable():
             )
         )
 
+        
+        # Mark this period as completed in the wizard.
+        connection.execute("""
+            INSERT INTO timetable_progress
+                (teacher_id, day, period, status)
+            VALUES (?, ?, ?, 'LESSON')
+            ON CONFLICT(teacher_id, day, period)
+            DO UPDATE SET status = 'LESSON'
+        """, (teacher_id, day, period))
+
+
     return jsonify(timetable), 201
+
+
+
+
+@app.put("/api/timetable-period")
+def update_timetable_period():
+    """Atomically change one teacher's period between FREE and LESSON."""
+    data = request.get_json(silent=True)
+    if not isinstance(data, dict):
+        return jsonify({"message": "A valid JSON object is required"}), 400
+
+    teacher_id, day, period = data.get("teacherId"), data.get("day"), data.get("period")
+    status = data.get("status")
+    if not isinstance(teacher_id, str) or not teacher_id.strip():
+        return jsonify({"message": "Teacher is required"}), 400
+    teacher_id = teacher_id.strip()
+    if day not in ("Monday", "Tuesday", "Wednesday", "Thursday", "Friday"):
+        return jsonify({"message": "Invalid school day"}), 400
+    if type(period) is not int or not 1 <= period <= 8:
+        return jsonify({"message": "Period must be between 1 and 8"}), 400
+    if status not in ("FREE", "LESSON"):
+        return jsonify({"message": "Status must be FREE or LESSON"}), 400
+
+    class_name = data.get("className")
+    subject = data.get("subject")
+    if status == "LESSON":
+        if not isinstance(class_name, str) or not class_name.strip():
+            return jsonify({"message": "Class is required"}), 400
+        if not isinstance(subject, str) or not subject.strip():
+            return jsonify({"message": "Subject is required"}), 400
+        class_name, subject = class_name.strip(), subject.strip()
+
+    try:
+        with get_connection() as connection:
+            connection.execute("BEGIN IMMEDIATE")
+            teacher = connection.execute(
+                "SELECT active, subjects FROM teachers WHERE id = ?", (teacher_id,)
+            ).fetchone()
+            if teacher is None:
+                return jsonify({"message": "Teacher not found"}), 404
+            if not teacher["active"]:
+                return jsonify({"message": "Teacher is inactive"}), 409
+            if status == "LESSON" and subject not in json.loads(teacher["subjects"]):
+                return jsonify({"message": "Teacher does not teach this subject"}), 409
+
+            existing = connection.execute("""
+                SELECT id, class_name, subject FROM timetables
+                WHERE teacher_id = ? AND day = ? AND period = ?
+            """, (teacher_id, day, period)).fetchone()
+
+            # A relief assignment refers to this teacher's original lesson.
+            # Do not alter its subject or class while assignments depend on it.
+            if existing and (status == "FREE" or
+                             existing["class_name"] != class_name or
+                             existing["subject"] != subject):
+                linked = connection.execute("""
+                    SELECT 1 FROM relief_assignments
+                    WHERE absent_teacher_id = ? AND period = ?
+                      AND class_name = ? COLLATE NOCASE
+                      AND subject = ?
+                      AND CAST(strftime('%w', date) AS INTEGER) = ?
+                    LIMIT 1
+                """, (teacher_id, period, existing["class_name"],
+                      existing["subject"],
+                      ("Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday").index(day))).fetchone()
+                if linked:
+                    return jsonify({"message": "Remove linked relief assignments before changing this lesson"}), 409
+
+            if status == "LESSON":
+                conflict = connection.execute("""
+                    SELECT id FROM timetables
+                    WHERE day = ? AND period = ?
+                      AND class_name = ? COLLATE NOCASE
+                      AND id != ?
+                """, (day, period, class_name, existing["id"] if existing else "")).fetchone()
+                if conflict:
+                    return jsonify({"message": "This class already has a lesson in that period"}), 409
+
+                # Existing relief teachers must remain free in their assigned periods.
+                relief_conflict = connection.execute("""
+                    SELECT 1 FROM relief_assignments
+                    WHERE relief_teacher_id = ? AND period = ?
+                      AND CAST(strftime('%w', date) AS INTEGER) = ?
+                    LIMIT 1
+                """, (teacher_id, period,
+                      ("Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday").index(day))).fetchone()
+                if relief_conflict and existing is None:
+                    return jsonify({"message": "Teacher has a relief assignment in this period"}), 409
+
+                if existing:
+                    entry_id = existing["id"]
+                    connection.execute("""
+                        UPDATE timetables SET class_name = ?, subject = ? WHERE id = ?
+                    """, (class_name, subject, entry_id))
+                else:
+                    entry_id = str(uuid.uuid4())
+                    connection.execute("""
+                        INSERT INTO timetables
+                            (id, teacher_id, class_name, subject, day, period)
+                        VALUES (?, ?, ?, ?, ?, ?)
+                    """, (entry_id, teacher_id, class_name, subject, day, period))
+                result = {"id": entry_id, "teacherId": teacher_id,
+                          "className": class_name, "subject": subject,
+                          "day": day, "period": period}
+            else:
+                if existing:
+                    connection.execute("DELETE FROM timetables WHERE id = ?", (existing["id"],))
+                result = None
+
+            connection.execute("""
+                INSERT INTO timetable_progress (teacher_id, day, period, status)
+                VALUES (?, ?, ?, ?)
+                ON CONFLICT(teacher_id, day, period)
+                DO UPDATE SET status = excluded.status
+            """, (teacher_id, day, period, status))
+
+        return jsonify({"message": "Period updated successfully", "status": status,
+                        "entry": result}), 200
+    except sqlite3.IntegrityError:
+        return jsonify({"message": "Timetable conflicts with an existing lesson"}), 409
 
 
 @app.put("/api/teachers/<teacher_id>")
@@ -827,6 +1075,10 @@ def delete_timetable(entry_id):
             "DELETE FROM timetables WHERE id = ?",
             (entry_id,)
         )
+        connection.execute("""
+            DELETE FROM timetable_progress
+            WHERE teacher_id = ? AND day = ? AND period = ?
+        """, (entry["teacher_id"], entry["day"], entry["period"]))
 
     return jsonify({"message": "Timetable entry removed successfully"}), 200
 

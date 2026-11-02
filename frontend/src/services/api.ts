@@ -186,3 +186,56 @@ export async function deleteTimetable(id: string): Promise<void> {
     throw new Error(data?.message ?? "Failed to remove timetable.")
   }
 }
+
+
+export async function saveFreePeriod(
+  teacherId: string,
+  day: string,
+  period: number
+) {
+  const response = await fetch(
+    "http://127.0.0.1:5000/api/timetable-progress/free",
+    {
+      method: "PUT",
+      headers: {
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
+        teacherId,
+        day,
+        period,
+      }),
+    }
+  )
+
+  const data = await response.json()
+
+  if (!response.ok) {
+    throw new Error(
+      data.message || "Failed to save free period"
+    )
+  }
+
+  return data
+}
+
+
+export type TimetableProgress = {
+  day: string
+  period: number
+  status: "FREE" | "LESSON"
+}
+
+export async function fetchTimetableProgress(
+  teacherId: string
+): Promise<TimetableProgress[]> {
+  const response = await fetch(
+    `http://127.0.0.1:5000/api/timetable-progress/${encodeURIComponent(teacherId)}`
+  )
+
+  if (!response.ok) {
+    throw new Error("Failed to load timetable progress")
+  }
+
+  return response.json()
+}

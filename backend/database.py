@@ -46,6 +46,29 @@ def initialize_database():
                 UNIQUE(day, period, teacher_id)
             )
         """)
+        
+        # Timetable wizard progress tracking
+        connection.execute("""
+            CREATE TABLE IF NOT EXISTS timetable_progress (
+                teacher_id TEXT NOT NULL,
+                day TEXT NOT NULL
+                    CHECK (day IN (
+                        'Monday', 'Tuesday', 'Wednesday',
+                        'Thursday', 'Friday'
+                    )),
+                period INTEGER NOT NULL
+                    CHECK (period BETWEEN 1 AND 8),
+                status TEXT NOT NULL
+                    CHECK (status IN ('FREE', 'LESSON')),
+
+                PRIMARY KEY (teacher_id, day, period),
+
+                FOREIGN KEY (teacher_id)
+                    REFERENCES teachers(id)
+                    ON DELETE CASCADE
+            )
+        """)
+
 
         # 3. Absences table
         connection.execute("""
