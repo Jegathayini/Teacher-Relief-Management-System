@@ -31,7 +31,7 @@ function Timetables() {
   const [teachers, setTeachers] = useState<Teacher[]>([])
   const [databaseEntries, setDatabaseEntries] = useState<TimetableEntry[]>([])
   const [schoolClasses, setSchoolClasses] = useState<SchoolClass[]>([])
-  const [databaseStatus, setDatabaseStatus] = useState("Checking SQLite...")
+  const [databaseStatus, setDatabaseStatus] = useState("Checking cloud database...")
 
   // Selected teacher
   const [teacherId, setTeacherId] = useState("")
@@ -59,7 +59,7 @@ const progressRequestId = useRef(0)
   const [isSaving, setIsSaving] = useState(false)
   const [deletingId, setDeletingId] = useState<string | null>(null)
 
-  // Load SQLite data
+  // Load school-scoped cloud data
   useEffect(() => {
     async function loadDatabaseData() {
       try {
@@ -72,10 +72,10 @@ const progressRequestId = useRef(0)
         setDatabaseEntries(timetables)
         setTeachers(databaseTeachers)
         setSchoolClasses(configuration.classes)
-        setDatabaseStatus("Connected to SQLite")
+        setDatabaseStatus("Connected to Supabase")
       } catch (loadError) {
-        console.error("SQLite API error:", loadError)
-        setDatabaseStatus("SQLite connection failed")
+        console.error("Cloud API error:", loadError)
+        setDatabaseStatus("Cloud connection failed")
       }
     }
 
@@ -229,7 +229,7 @@ const currentLesson = databaseEntries.find(
   async function handleFreePeriod() {
     if (!teacherId || isSaving) return
 
-    if (databaseStatus !== "Connected to SQLite") {
+    if (databaseStatus !== "Connected to Supabase") {
       setError("Connect to SQLite before saving.")
       return
     }
@@ -285,7 +285,7 @@ const currentLesson = databaseEntries.find(
   async function handleSaveLesson() {
     if (!teacherId || isSaving) return
 
-    if (databaseStatus !== "Connected to SQLite") {
+    if (databaseStatus !== "Connected to Supabase") {
       setError("Connect to SQLite before saving.")
       return
     }
@@ -383,7 +383,7 @@ const currentLesson = databaseEntries.find(
     const cleanClass = className.trim()
     const cleanSubject = subject.trim()
 
-    if (databaseStatus !== "Connected to SQLite") {
+    if (databaseStatus !== "Connected to Supabase") {
       setError("Connect to SQLite before adding a timetable entry.")
       return
     }
@@ -532,7 +532,7 @@ const currentLesson = databaseEntries.find(
             {databaseStatus}
           </span>
 
-          {databaseStatus === "Connected to SQLite" && (
+          {databaseStatus === "Connected to Supabase" && (
             <span className="rounded-lg bg-slate-800 px-3 py-2 text-sm text-slate-300">
               SQLite Timetable Entries: {databaseEntries.length}
             </span>
@@ -664,7 +664,7 @@ const currentLesson = databaseEntries.find(
               onClick={handleFreePeriod}
               disabled={
                 isSaving || isLoadingProgress ||
-                databaseStatus !== "Connected to SQLite"
+                databaseStatus !== "Connected to Supabase"
               }
               className="rounded-lg border border-slate-600 bg-slate-700 p-4 font-semibold text-white hover:bg-slate-600 disabled:cursor-not-allowed disabled:opacity-50"
             >
@@ -758,7 +758,7 @@ const currentLesson = databaseEntries.find(
                 onClick={handleSaveLesson}
                 disabled={
                   isSaving || isLoadingProgress ||
-                  databaseStatus !== "Connected to SQLite"
+                  databaseStatus !== "Connected to Supabase"
                 }
                 className="rounded-lg bg-cyan-600 px-5 py-3 font-semibold text-white hover:bg-cyan-500 disabled:cursor-not-allowed disabled:opacity-50"
               >
@@ -935,7 +935,7 @@ const currentLesson = databaseEntries.find(
           type="submit"
           disabled={
             isSaving ||
-            databaseStatus !== "Connected to SQLite"
+            databaseStatus !== "Connected to Supabase"
           }
           className="rounded-lg bg-cyan-500 px-5 py-3 font-semibold text-slate-950 hover:bg-cyan-400 disabled:cursor-not-allowed disabled:opacity-50"
         >
@@ -1006,7 +1006,7 @@ const currentLesson = databaseEntries.find(
                         disabled={
                           deletingId !== null ||
                           isSaving ||
-                          databaseStatus !== "Connected to SQLite"
+                          databaseStatus !== "Connected to Supabase"
                         }
                         title="Delete SQLite timetable entry"
                         className="rounded-lg bg-red-600 px-3 py-2 text-xs text-white hover:bg-red-500 disabled:cursor-not-allowed disabled:opacity-40"

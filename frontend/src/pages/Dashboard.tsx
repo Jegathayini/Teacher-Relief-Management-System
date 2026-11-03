@@ -1,7 +1,9 @@
+
 import GradeClassManager from "../components/GradeClassManager"
 import { useEffect, useState } from "react"
 import AcademicYearManager from "../components/AcademicYearManager"
-import { fetchCloudTeachers } from "../services/api"
+import { fetchCloudTeachers, fetchCloudDashboardStats } from "../services/api"
+import type { CloudDashboardStats } from "../services/api"
 import type { Teacher } from "../types"
 
 // Get today's date in local YYYY-MM-DD format
@@ -18,6 +20,7 @@ function getToday(): string {
 function Dashboard() {
   const [teachers, setTeachers] = useState<Teacher[]>([])
   const [date, setDate] = useState(getToday)
+  const [dailyStats, setDailyStats] = useState<CloudDashboardStats | null>(null)
 
   const [loading, setLoading] = useState(true)
   const [loadError, setLoadError] = useState("")
@@ -64,6 +67,25 @@ function Dashboard() {
     }
   }, [])
 
+  useEffect(() => {
+    let cancelled = false
+    setDailyStats(null)
+
+    void fetchCloudDashboardStats(date)
+      .then((stats) => {
+        if (!cancelled) setDailyStats(stats)
+      })
+      .catch((error) => {
+        if (!cancelled) {
+          console.error("Daily statistics unavailable:", error)
+        }
+      })
+
+    return () => {
+      cancelled = true
+    }
+  }, [date])
+
   const connected = backendStatus === "connected"
 
   const totalTeachers = teachers.length
@@ -85,21 +107,21 @@ function Dashboard() {
     },
     {
       title: "Absent Teachers",
-      value: "—",
+      value: dailyStats ? String(dailyStats.absentTeachers) : "—",
       color: "text-red-400",
-      available: false,
+      available: Boolean(dailyStats),
     },
     {
       title: "Relief Assigned",
-      value: "—",
+      value: dailyStats ? String(dailyStats.reliefAssigned) : "—",
       color: "text-green-400",
-      available: false,
+      available: Boolean(dailyStats),
     },
     {
       title: "Pending Relief",
-      value: "—",
+      value: dailyStats ? String(dailyStats.pendingRelief) : "—",
       color: "text-amber-400",
-      available: false,
+      available: Boolean(dailyStats),
     },
   ]
 
