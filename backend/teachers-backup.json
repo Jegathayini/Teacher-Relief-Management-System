@@ -1,0 +1,92 @@
+{
+  "version": 1,
+  "exportedAt": "2026-10-31T15:27:16.764Z",
+  "teachers": [
+    {
+      "id": "d101d99e-9499-4a50-8374-b671e3254907",
+      "name": "Kamali",
+      "subjects": [
+        "Mathematics"
+      ],
+      "active": true
+    },
+    {
+      "id": "d991ba62-762a-4d80-b306-cffc867d9754",
+      "name": "Vimala",
+      "subjects": [
+        "Science"
+      ],
+      "active": true
+    },
+    {
+      "id": "bf92f81b-d955-4b02-91bc-cc4dd52210d2",
+      "name": "Malini",
+      "subjects": [
+        "Tamil"
+      ],
+      "active": true
+    },
+    {
+      "id": "2e3b33f4-2550-4585-a8be-08cc7a14dec8",
+      "name": "Arun",
+      "subjects": [
+        "Music"
+      ],
+      "active": true
+    },
+    {
+      "id": "480993be-e264-4104-97c2-2fe3f25f4f08",
+      "name": "Nimal",
+      "subjects": [
+        "Art"
+      ],
+      "active": true
+    }
+  ],
+  "timetables": [],
+  "absences": [
+    {
+      "id": "10477219-ecb4-4dcb-a904-24cf42ed9b2b",
+      "teacherId": "d101d99e-9499-4a50-8374-b671e3254907",
+      "date": "2026-10-30",
+      "reason": ""
+    },
+    {
+      "id": "1f2ea005-312f-425f-8f8a-555cbde9fd89",
+      "teacherId": "d101d99e-9499-4a50-8374-b671e3254907",
+      "date": "2026-11-01",
+      "reason": ""
+    },
+    {
+      "id": "77d0a3b9-b183-4d27-9917-064db824c76b",
+      "teacherId": "d101d99e-9499-4a50-8374-b671e3254907",
+      "date": "2026-11-02",
+      "reason": ""
+    },
+    {
+      "id": "1b5b933e-a898-4ec5-bb72-8934177e7db7",
+      "teacherId": "d991ba62-762a-4d80-b306-cffc867d9754",
+      "date": "2026-10-30",
+      "reason": ""
+    },
+    {
+      "id": "eb6c31ea-dfa8-4dee-8270-cec7bef67b8e",
+      "teacherId": "bf92f81b-d955-4b02-91bc-cc4dd52210d2",
+      "date": "2026-10-30",
+      "reason": ""
+    },
+    {
+      "id": "e9bf7dbd-904d-4a1a-bfad-13fce676908d",
+      "teacherId": "d991ba62-762a-4d80-b306-cffc867d9754",
+      "date": "2026-11-02",
+      "reason": ""
+    },
+    {
+      "id": "aac525af-202b-46ca-9121-1147b5109e29",
+      "teacherId": "2e3b33f4-2550-4585-a8be-08cc7a14dec8",
+      "date": "2026-11-02",
+      "reason": ""
+    }
+  ],
+  "assignments": []
+}

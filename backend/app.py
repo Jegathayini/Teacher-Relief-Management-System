@@ -1,15 +1,55 @@
 from database import (initialize_database, import_teachers,get_connection)
+from auth_middleware import require_school_admin
 from flask import Flask, jsonify, request, send_file
 from flask_cors import CORS
 import json
-import uuid
+from uuid import uuid4
+from psycopg import sql
 import sqlite3
 from datetime import date
 from io import BytesIO
 import os
 import tempfile
+from postgres_database import get_postgres_connection
+from uuid import uuid4
 
 app = Flask(__name__)
+CORS(
+    app,
+    resources={
+        r"/api/*": {
+            "origins": [
+                "http://localhost:5173",
+                "http://127.0.0.1:5173"
+            ]
+        }
+    },
+    allow_headers=["Authorization", "Content-Type"],
+    methods=["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"]
+)
+
+from flask import g
+from auth_middleware import require_school_admin
+
+
+@app.before_request
+def protect_api_routes():
+    # Browser CORS preflight requests do not carry login tokens.
+    if request.method == "OPTIONS":
+        return None
+
+    if request.path == "/api/health":
+        return None
+
+    if request.path.startswith("/api/"):
+        @require_school_admin
+        def authenticated_request():
+            return None
+
+        return authenticated_request()
+
+    return None
+
 @app.get("/")
 def home():
     return jsonify({
@@ -37,8 +77,251 @@ def health_check():
 
 
 
+@app.get("/api/cloud/teachers")
+@require_school_admin
+def get_cloud_teachers():
+    school_id = g.school_id
+
+    with get_postgres_connection() as connection:
+        with connection.cursor() as cursor:
+            cursor.execute(
+                """
+                SELECT id, name, subjects, active
+                FROM teachers
+                WHERE school_id = %s
+                ORDER BY name
+                """,
+                (school_id,)
+            )
+
+            rows = cursor.fetchall()
+
+    teachers = []
+
+    for row in rows:
+        subjects = row["subjects"] or ""
+
+        teachers.append({
+            "id": row["id"],
+            "name": row["name"],
+            "subjects": [
+                subject.strip()
+                for subject in subjects.split(",")
+                if subject.strip()
+            ],
+            "active": bool(row["active"])
+        })
+
+    return jsonify(teachers)
+
+
+@app.put("/api/cloud/teachers/<teacher_id>")
+@require_school_admin
+def update_cloud_teacher(teacher_id):
+    data = request.get_json(silent=True)
+
+    if not isinstance(data, dict):
+        return jsonify({"message": "Invalid request body."}), 400
+
+    name = data.get("name")
+    subjects = data.get("subjects")
+
+    if not isinstance(name, str) or not name.strip():
+        return jsonify({"message": "Teacher name is required."}), 400
+
+    if not isinstance(subjects, list):
+        return jsonify({"message": "Subjects must be an array."}), 400
+
+    clean_subjects = list(dict.fromkeys(
+        subject.strip()
+        for subject in subjects
+        if isinstance(subject, str) and subject.strip()
+    ))
+
+    if not clean_subjects:
+        return jsonify({"message": "At least one subject is required."}), 400
+
+    with get_postgres_connection() as connection:
+        with connection.cursor() as cursor:
+            cursor.execute(
+                """
+                UPDATE teachers
+                SET name = %s, subjects = %s
+                WHERE id = %s AND school_id = %s
+                RETURNING id, name, subjects, active
+                """,
+                (
+                    name.strip(),
+                    ", ".join(clean_subjects),
+                    teacher_id,
+                    g.school_id
+                )
+            )
+
+            teacher = cursor.fetchone()
+
+    if teacher is None:
+        return jsonify({"message": "Teacher not found."}), 404
+
+    return jsonify({
+        "id": teacher["id"],
+        "name": teacher["name"],
+        "subjects": [
+            subject.strip()
+            for subject in teacher["subjects"].split(",")
+            if subject.strip()
+        ],
+        "active": bool(teacher["active"])
+    })
+
+
+@app.patch("/api/cloud/teachers/<teacher_id>/status")
+@require_school_admin
+def update_cloud_teacher_status(teacher_id):
+    data = request.get_json(silent=True)
+
+    if not isinstance(data, dict) or type(data.get("active")) is not bool:
+        return jsonify({
+            "message": "The active field must be true or false."
+        }), 400
+
+    active = data["active"]
+
+    with get_postgres_connection() as connection:
+        with connection.cursor() as cursor:
+            cursor.execute(
+                """
+                UPDATE teachers
+                SET active = %s
+                WHERE id = %s AND school_id = %s
+                RETURNING id, name, subjects, active
+                """,
+                (int(active), teacher_id, g.school_id)
+            )
+
+            teacher = cursor.fetchone()
+
+    if teacher is None:
+        return jsonify({
+            "message": "Teacher not found."
+        }), 404
+
+    return jsonify({
+        "id": teacher["id"],
+        "name": teacher["name"],
+        "subjects": [
+            subject.strip()
+            for subject in (teacher["subjects"] or "").split(",")
+            if subject.strip()
+        ],
+        "active": bool(teacher["active"])
+    })
+
+
+@app.delete("/api/cloud/teachers/<teacher_id>")
+@require_school_admin
+def delete_cloud_teacher(teacher_id):
+    try:
+        with get_postgres_connection() as connection:
+            with connection.cursor() as cursor:
+                cursor.execute(
+                    """
+                    DELETE FROM teachers
+                    WHERE id = %s AND school_id = %s
+                    RETURNING id
+                    """,
+                    (teacher_id, g.school_id)
+                )
+
+                deleted = cursor.fetchone()
+
+        if deleted is None:
+            return jsonify({
+                "message": "Teacher not found."
+            }), 404
+
+        return jsonify({
+            "message": "Teacher deleted successfully."
+        }), 200
+
+    except Exception:
+        app.logger.exception("Failed to delete cloud teacher")
+        return jsonify({
+            "message": "Unable to delete teacher. The teacher may have linked records."
+        }), 409
+
+
+@app.post("/api/cloud/teachers")
+@require_school_admin
+def create_cloud_teacher():
+    from uuid import uuid4
+
+    data = request.get_json(silent=True)
+
+    if not isinstance(data, dict):
+        return jsonify({
+            "message": "Invalid request body."
+        }), 400
+
+    name = data.get("name")
+    subjects = data.get("subjects")
+
+    if not isinstance(name, str) or not name.strip():
+        return jsonify({
+            "message": "Teacher name is required."
+        }), 400
+
+    if not isinstance(subjects, list):
+        return jsonify({
+            "message": "Subjects must be an array."
+        }), 400
+
+    clean_name = name.strip()
+
+    clean_subjects = list(dict.fromkeys(
+        subject.strip()
+        for subject in subjects
+        if isinstance(subject, str) and subject.strip()
+    ))
+
+    if not clean_subjects:
+        return jsonify({
+            "message": "At least one subject is required."
+        }), 400
+
+    teacher_id = str(uuid4())
+    school_id = g.school_id
+
+    with get_postgres_connection() as connection:
+        with connection.cursor() as cursor:
+            cursor.execute(
+                """
+                INSERT INTO teachers
+                    (id, school_id, name, subjects, active)
+                VALUES (%s, %s, %s, %s, %s)
+                RETURNING id, name, subjects, active
+                """,
+                (
+                    teacher_id,
+                    school_id,
+                    clean_name,
+                    ", ".join(clean_subjects),
+                    1
+                )
+            )
+
+            row = cursor.fetchone()
+
+    return jsonify({
+        "id": row["id"],
+        "name": row["name"],
+        "subjects": clean_subjects,
+        "active": bool(row["active"])
+    }), 201
+
 
 @app.get("/api/teachers")
+@require_school_admin
 def get_teachers():
     with get_connection() as connection:
         rows = connection.execute("""
@@ -1267,6 +1550,451 @@ def remove_grade(grade_id):
             return jsonify({"message":"Remove this grade's classes first."}), 409
         conn.execute("DELETE FROM grades WHERE id=?", (grade_id,))
     return jsonify({"message":"Grade deleted."})
+
+
+# ---------------------------------------------
+# CLOUD ACADEMIC YEAR MANAGEMENT
+# ---------------------------------------------
+
+def archive_cloud_table(cursor, source, archive, school_id, year):
+    """
+    Archive rows belonging to one school.
+
+    Copies columns shared by the source and archive tables,
+    and supplies academic_year and archive_id where required.
+    """
+
+    cursor.execute(
+        """
+        SELECT table_name, column_name
+        FROM information_schema.columns
+        WHERE table_schema = 'public'
+          AND table_name IN (%s, %s)
+        ORDER BY ordinal_position
+        """,
+        (source, archive)
+    )
+
+    columns = {}
+
+    for row in cursor.fetchall():
+        columns.setdefault(row["table_name"], []).append(
+            row["column_name"]
+        )
+
+    source_columns = set(columns.get(source, []))
+    archive_columns = columns.get(archive, [])
+
+    if "school_id" not in source_columns:
+        raise ValueError("Source table has no school_id")
+
+    if "academic_year" not in archive_columns:
+        raise ValueError("Archive table has no academic_year")
+
+    insert_columns = []
+    select_expressions = []
+    parameters = []
+
+    for column in archive_columns:
+        if column == "academic_year":
+            insert_columns.append(sql.Identifier(column))
+            select_expressions.append(sql.Placeholder())
+            parameters.append(year)
+
+        elif column == "archive_id" and column not in source_columns:
+            insert_columns.append(sql.Identifier(column))
+            select_expressions.append(
+                sql.SQL("md5(random()::text || clock_timestamp()::text)")
+            )
+
+        elif column in source_columns:
+            insert_columns.append(sql.Identifier(column))
+            select_expressions.append(sql.Identifier(column))
+
+    query = sql.SQL("""
+        INSERT INTO {archive} ({columns})
+        SELECT {expressions}
+        FROM {source}
+        WHERE school_id = %s
+    """).format(
+        archive=sql.Identifier(archive),
+        columns=sql.SQL(", ").join(insert_columns),
+        expressions=sql.SQL(", ").join(select_expressions),
+        source=sql.Identifier(source)
+    )
+
+    parameters.append(school_id)
+    cursor.execute(query, parameters)
+
+
+@app.get("/api/cloud/academic-year")
+@require_school_admin
+def get_cloud_academic_year():
+    with get_postgres_connection() as connection:
+        with connection.cursor() as cursor:
+            cursor.execute(
+                """
+                SELECT year, start_date
+                FROM academic_year_state
+                WHERE school_id = %s
+                """,
+                (g.school_id,)
+            )
+
+            state = cursor.fetchone()
+
+            cursor.execute(
+                """
+                SELECT COUNT(*) AS count
+                FROM timetables
+                WHERE school_id = %s
+                """,
+                (g.school_id,)
+            )
+
+            timetable_count = cursor.fetchone()["count"]
+
+            cursor.execute(
+                """
+                SELECT COUNT(*) AS count
+                FROM timetable_progress
+                WHERE school_id = %s
+                """,
+                (g.school_id,)
+            )
+
+            progress_count = cursor.fetchone()["count"]
+
+    if state is None:
+        return jsonify({
+            "message": "Academic year is not configured."
+        }), 404
+
+    return jsonify({
+        "year": state["year"],
+        "startDate": state["start_date"],
+        "timetableCount": timetable_count,
+        "progressCount": progress_count
+    })
+
+
+@app.post("/api/cloud/academic-year/rollover")
+@require_school_admin
+def rollover_cloud_academic_year():
+    data = request.get_json(silent=True)
+
+    if not isinstance(data, dict):
+        return jsonify({"message": "Invalid request body."}), 400
+
+    new_year = data.get("newYear")
+    start_date = data.get("startDate")
+    confirmation = data.get("confirmation")
+
+    if type(new_year) is not int or not 2000 <= new_year <= 2200:
+        return jsonify({"message": "Invalid academic year."}), 400
+
+    if confirmation != f"RESET {new_year}":
+        return jsonify({"message": "Invalid confirmation."}), 400
+
+    try:
+        parsed_date = date.fromisoformat(start_date)
+
+        if parsed_date.year != new_year:
+            raise ValueError()
+
+    except (TypeError, ValueError):
+        return jsonify({"message": "Invalid start date."}), 400
+
+    try:
+        with get_postgres_connection() as connection:
+            with connection.transaction():
+                with connection.cursor() as cursor:
+
+                    cursor.execute(
+                        """
+                        SELECT year
+                        FROM academic_year_state
+                        WHERE school_id = %s
+                        FOR UPDATE
+                        """,
+                        (g.school_id,)
+                    )
+
+                    current = cursor.fetchone()
+
+                    if current is None:
+                        return jsonify({
+                            "message": "Academic year not configured."
+                        }), 404
+
+                    old_year = current["year"]
+
+                    if new_year != old_year + 1:
+                        return jsonify({
+                            "message": "New year must be the next academic year."
+                        }), 400
+
+                    archive_cloud_table(
+                        cursor,
+                        "timetables",
+                        "timetable_archives",
+                        g.school_id,
+                        old_year
+                    )
+
+                    archive_cloud_table(
+                        cursor,
+                        "timetable_progress",
+                        "timetable_progress_archives",
+                        g.school_id,
+                        old_year
+                    )
+
+                    cursor.execute(
+                        """
+                        DELETE FROM timetable_progress
+                        WHERE school_id = %s
+                        """,
+                        (g.school_id,)
+                    )
+
+                    cursor.execute(
+                        """
+                        DELETE FROM timetables
+                        WHERE school_id = %s
+                        """,
+                        (g.school_id,)
+                    )
+
+                    cursor.execute(
+                        """
+                        UPDATE academic_year_state
+                        SET year = %s,
+                            start_date = %s
+                        WHERE school_id = %s
+                        """,
+                        (new_year, start_date, g.school_id)
+                    )
+
+        return jsonify({
+            "message": "Academic year reset successfully.",
+            "previousYear": old_year,
+            "newYear": new_year
+        })
+
+    except Exception:
+        app.logger.exception("Cloud academic year rollover failed")
+
+        return jsonify({
+            "message": "Academic year reset failed. No changes were committed."
+        }), 500
+
+
+# ---------------------------------------------
+# CLOUD SCHOOL CONFIGURATION - SCHEMA CHECK
+# ---------------------------------------------
+
+@app.get("/api/cloud/configuration/schema")
+@require_school_admin
+def get_cloud_configuration_schema():
+    with get_postgres_connection() as connection:
+        with connection.cursor() as cursor:
+            cursor.execute(
+                """
+                SELECT
+                    table_name,
+                    column_name,
+                    data_type,
+                    is_nullable
+                FROM information_schema.columns
+                WHERE table_schema = 'public'
+                  AND table_name IN (
+                      'grades',
+                      'school_classes'
+                  )
+                ORDER BY table_name, ordinal_position
+                """
+            )
+
+            rows = cursor.fetchall()
+
+    return jsonify(rows)
+
+
+# =============================================
+# CLOUD GRADES AND CLASSES MANAGEMENT
+# =============================================
+
+@app.get("/api/cloud/configuration")
+@require_school_admin
+def get_cloud_configuration():
+    with get_postgres_connection() as connection:
+        with connection.cursor() as cursor:
+            cursor.execute("""
+                SELECT id, name
+                FROM grades
+                WHERE school_id = %s
+                ORDER BY name
+            """, (g.school_id,))
+            grades = cursor.fetchall()
+
+            cursor.execute("""
+                SELECT id, grade_id, section
+                FROM school_classes
+                WHERE school_id = %s
+                ORDER BY section
+            """, (g.school_id,))
+            classes = cursor.fetchall()
+
+    return jsonify({
+        "grades": grades,
+        "classes": classes
+    })
+
+
+@app.post("/api/cloud/grades")
+@require_school_admin
+def create_cloud_grade():
+    data = request.get_json(silent=True) or {}
+    name = data.get("name")
+
+    if not isinstance(name, str) or not name.strip():
+        return jsonify({"message": "Grade name is required."}), 400
+
+    name = name.strip()
+
+    with get_postgres_connection() as connection:
+        with connection.cursor() as cursor:
+            cursor.execute("""
+                SELECT id FROM grades
+                WHERE school_id = %s AND LOWER(name) = LOWER(%s)
+            """, (g.school_id, name))
+
+            if cursor.fetchone():
+                return jsonify({"message": "Grade already exists."}), 409
+
+            grade_id = str(uuid4())
+
+            cursor.execute("""
+                INSERT INTO grades (id, school_id, name)
+                VALUES (%s, %s, %s)
+            """, (grade_id, g.school_id, name))
+
+        connection.commit()
+
+    return jsonify({
+        "id": grade_id,
+        "name": name
+    }), 201
+
+
+@app.delete("/api/cloud/grades/<grade_id>")
+@require_school_admin
+def delete_cloud_grade(grade_id):
+    with get_postgres_connection() as connection:
+        with connection.cursor() as cursor:
+            cursor.execute("""
+                SELECT id FROM school_classes
+                WHERE school_id = %s AND grade_id = %s
+                LIMIT 1
+            """, (g.school_id, grade_id))
+
+            if cursor.fetchone():
+                return jsonify({
+                    "message": "Delete the classes in this grade first."
+                }), 409
+
+            cursor.execute("""
+                DELETE FROM grades
+                WHERE id = %s AND school_id = %s
+                RETURNING id
+            """, (grade_id, g.school_id))
+
+            deleted = cursor.fetchone()
+
+        connection.commit()
+
+    if not deleted:
+        return jsonify({"message": "Grade not found."}), 404
+
+    return jsonify({"message": "Grade deleted successfully."})
+
+
+@app.post("/api/cloud/classes")
+@require_school_admin
+def create_cloud_class():
+    data = request.get_json(silent=True) or {}
+    grade_id = data.get("gradeId")
+    section = data.get("section")
+
+    if not isinstance(grade_id, str) or not grade_id.strip():
+        return jsonify({"message": "Select a grade."}), 400
+
+    if not isinstance(section, str) or not section.strip():
+        return jsonify({"message": "Class division is required."}), 400
+
+    section = section.strip()
+
+    with get_postgres_connection() as connection:
+        with connection.cursor() as cursor:
+            cursor.execute("""
+                SELECT id FROM grades
+                WHERE id = %s AND school_id = %s
+            """, (grade_id, g.school_id))
+
+            if not cursor.fetchone():
+                return jsonify({"message": "Grade not found."}), 404
+
+            cursor.execute("""
+                SELECT id FROM school_classes
+                WHERE school_id = %s
+                  AND grade_id = %s
+                  AND LOWER(section) = LOWER(%s)
+            """, (g.school_id, grade_id, section))
+
+            if cursor.fetchone():
+                return jsonify({
+                    "message": "This class already exists."
+                }), 409
+
+            class_id = str(uuid4())
+
+            cursor.execute("""
+                INSERT INTO school_classes (
+                    id, school_id, grade_id, section
+                )
+                VALUES (%s, %s, %s, %s)
+            """, (class_id, g.school_id, grade_id, section))
+
+        connection.commit()
+
+    return jsonify({
+        "id": class_id,
+        "grade_id": grade_id,
+        "section": section
+    }), 201
+
+
+@app.delete("/api/cloud/classes/<class_id>")
+@require_school_admin
+def delete_cloud_class(class_id):
+    with get_postgres_connection() as connection:
+        with connection.cursor() as cursor:
+            cursor.execute("""
+                DELETE FROM school_classes
+                WHERE id = %s AND school_id = %s
+                RETURNING id
+            """, (class_id, g.school_id))
+
+            deleted = cursor.fetchone()
+
+        connection.commit()
+
+    if not deleted:
+        return jsonify({"message": "Class not found."}), 404
+
+    return jsonify({"message": "Class deleted successfully."})
+
 
 if __name__ == "__main__":
     initialize_database()

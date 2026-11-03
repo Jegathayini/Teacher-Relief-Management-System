@@ -1,5 +1,21 @@
 const API_BASE_URL = "http://127.0.0.1:5000"
 
+
+import { supabase } from "../lib/supabase"
+
+export async function getAuthenticatedHeaders(): Promise<HeadersInit> {
+  const { data, error } = await supabase.auth.getSession()
+
+  if (error || !data.session) {
+    throw new Error("Please sign in to continue.")
+  }
+
+  return {
+    Authorization: `Bearer ${data.session.access_token}`,
+    "Content-Type": "application/json",
+  }
+}
+
 export interface HealthResponse {
   status: string
   message: string
@@ -282,4 +298,248 @@ export async function rolloverAcademicYear(newYear: number, startDate: string, c
   })
   const result = await response.json()
   if (!response.ok) throw new Error(result.message || "Academic year rollover failed.")
+}
+
+
+
+export async function fetchCloudTeachers(): Promise<Teacher[]> {
+  const headers = await getAuthenticatedHeaders()
+
+  const response = await fetch(
+    `${API_BASE_URL}/api/cloud/teachers`,
+    { headers }
+  )
+
+  if (!response.ok) {
+    throw new Error(
+      `Cloud teacher request failed: ${response.status}`
+    )
+  }
+
+  const data: unknown = await response.json()
+
+  if (!Array.isArray(data)) {
+    throw new Error("Unexpected cloud teacher response")
+  }
+
+  return data as Teacher[]
+}
+
+export async function createCloudTeacher(
+  name: string,
+  subjects: string[]
+): Promise<Teacher> {
+  const headers = await getAuthenticatedHeaders()
+
+  const response = await fetch(
+    `${API_BASE_URL}/api/cloud/teachers`,
+    {
+      method: "POST",
+      headers,
+      body: JSON.stringify({ name, subjects }),
+    }
+  )
+
+  const data = await response.json().catch(() => null)
+
+  if (!response.ok) {
+    throw new Error(
+      data?.message ??
+      data?.error ??
+      `Failed to add teacher (${response.status})`
+    )
+  }
+
+  return data as Teacher
+}
+
+export async function updateCloudTeacher(
+  teacherId: string,
+  name: string,
+  subjects: string[]
+): Promise<Teacher> {
+  const headers = await getAuthenticatedHeaders()
+
+  const response = await fetch(
+    `${API_BASE_URL}/api/cloud/teachers/${encodeURIComponent(teacherId)}`,
+    {
+      method: "PUT",
+      headers,
+      body: JSON.stringify({ name, subjects }),
+    }
+  )
+
+  const data = await response.json().catch(() => null)
+
+  if (!response.ok) {
+    throw new Error(
+      data?.message ??
+      data?.error ??
+      `Failed to update teacher (${response.status})`
+    )
+  }
+
+  return data as Teacher
+}
+
+export async function updateCloudTeacherStatus(
+  teacherId: string,
+  active: boolean
+): Promise<Teacher> {
+  const headers = await getAuthenticatedHeaders()
+
+  const response = await fetch(
+    `${API_BASE_URL}/api/cloud/teachers/${encodeURIComponent(teacherId)}/status`,
+    {
+      method: "PATCH",
+      headers,
+      body: JSON.stringify({ active }),
+    }
+  )
+
+  const data = await response.json().catch(() => null)
+
+  if (!response.ok) {
+    throw new Error(
+      data?.message ??
+      data?.error ??
+      `Failed to update teacher status (${response.status})`
+    )
+  }
+
+  return data as Teacher
+}
+
+export async function deleteCloudTeacher(
+  teacherId: string
+): Promise<void> {
+  const headers = await getAuthenticatedHeaders()
+
+  const response = await fetch(
+    `${API_BASE_URL}/api/cloud/teachers/${encodeURIComponent(teacherId)}`,
+    {
+      method: "DELETE",
+      headers,
+    }
+  )
+
+  if (!response.ok) {
+    const data = await response.json().catch(() => null)
+
+    throw new Error(
+      data?.message ??
+      data?.error ??
+      `Failed to delete teacher (${response.status})`
+    )
+  }
+}
+
+
+export async function fetchCloudAcademicYear(): Promise<AcademicYearStatus> {
+  const headers = await getAuthenticatedHeaders()
+
+  const response = await fetch(
+    `${API_BASE_URL}/api/cloud/academic-year`,
+    {
+      method: "GET",
+      headers,
+    }
+  )
+
+  const data = await response.json().catch(() => null)
+
+  if (!response.ok) {
+    throw new Error(
+      data?.message ??
+      `Failed to load academic year (${response.status})`
+    )
+  }
+
+  return data as AcademicYearStatus
+}
+
+
+export interface CloudGrade {
+  id: string
+  name: string
+}
+
+export interface CloudSchoolClass {
+  id: string
+  grade_id: string
+  section: string
+}
+
+export interface CloudSchoolConfiguration {
+  grades: CloudGrade[]
+  classes: CloudSchoolClass[]
+}
+
+async function cloudConfigurationRequest<T>(
+  path: string,
+  options: RequestInit = {}
+): Promise<T> {
+  const headers = await getAuthenticatedHeaders()
+
+  const response = await fetch(`${API_BASE_URL}${path}`, {
+    ...options,
+    headers: {
+      ...headers,
+      "Content-Type": "application/json",
+      ...options.headers,
+    },
+  })
+
+  const data = await response.json().catch(() => null)
+
+  if (!response.ok) {
+    throw new Error(
+      data?.message ?? `Request failed (${response.status})`
+    )
+  }
+
+  return data as T
+}
+
+export function fetchCloudConfiguration() {
+  return cloudConfigurationRequest<CloudSchoolConfiguration>(
+    "/api/cloud/configuration"
+  )
+}
+
+export function createCloudGrade(name: string) {
+  return cloudConfigurationRequest<CloudGrade>(
+    "/api/cloud/grades",
+    {
+      method: "POST",
+      body: JSON.stringify({ name }),
+    }
+  )
+}
+
+export function deleteCloudGrade(gradeId: string) {
+  return cloudConfigurationRequest<{ message: string }>(
+    `/api/cloud/grades/${encodeURIComponent(gradeId)}`,
+    { method: "DELETE" }
+  )
+}
+
+export function createCloudClass(
+  gradeId: string,
+  section: string
+) {
+  return cloudConfigurationRequest<CloudSchoolClass>(
+    "/api/cloud/classes",
+    {
+      method: "POST",
+      body: JSON.stringify({ gradeId, section }),
+    }
+  )
+}
+
+export function deleteCloudClass(classId: string) {
+  return cloudConfigurationRequest<{ message: string }>(
+    `/api/cloud/classes/${encodeURIComponent(classId)}`,
+    { method: "DELETE" }
+  )
 }
