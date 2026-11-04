@@ -85,17 +85,34 @@ const progressRequestId = useRef(0)
   // Derived values
   const currentDay = DAYS[Math.floor(currentStep / 8)]
   const currentPeriod = PERIODS[currentStep % 8]
-  const currentSavedPeriod = savedProgress.find(
-  (item) =>
-    item.day === currentDay &&
-    item.period === currentPeriod
-)
-const currentLesson = databaseEntries.find(
-  (entry) =>
-    entry.teacherId === teacherId &&
-    entry.day === currentDay &&
-    entry.period === currentPeriod
-)
+  const currentLesson = databaseEntries.find(
+    (entry) =>
+      entry.teacherId === teacherId &&
+      entry.day === currentDay &&
+      entry.period === currentPeriod
+  )
+
+  // A slot is complete if it has a saved lesson OR a saved free-period status.
+  // Using a Set prevents the same slot from being counted twice.
+  const completedSlots = new Set<string>()
+  for (const entry of databaseEntries) {
+    if (entry.teacherId === teacherId && DAYS.includes(entry.day) && PERIODS.includes(entry.period)) {
+      completedSlots.add(`${entry.day}:${entry.period}`)
+    }
+  }
+  for (const item of savedProgress) {
+    if (DAYS.includes(item.day) && PERIODS.includes(item.period)) {
+      completedSlots.add(`${item.day}:${item.period}`)
+    }
+  }
+  const completedCount = teacherId ? completedSlots.size : 0
+
+  const currentSavedPeriod = currentLesson
+    ? { day: currentDay, period: currentPeriod, status: "LESSON" as const }
+    : savedProgress.find(
+        (item) => item.day === currentDay && item.period === currentPeriod
+      )
+
   const availableClassNames = Array.from(new Set([
     ...schoolClasses.map(item => item.name),
     ...databaseEntries.map(item => item.className),
@@ -150,24 +167,29 @@ const currentLesson = databaseEntries.find(
     setIsLoadingProgress(true)
 
     try {
-      const progress = await fetchTimetableProgress(id)
+      // Refresh both sources: existing lessons and explicit free periods.
+      const [progress, latestEntries] = await Promise.all([
+        fetchTimetableProgress(id),
+        fetchTimetables(),
+      ])
       if (requestId !== progressRequestId.current) return
       setSavedProgress(progress)
+      setDatabaseEntries(latestEntries)
 
-      // Find the first incomplete period among 40 periods.
-      const firstIncomplete = Array.from(
-        { length: 40 },
-        (_, index) => {
-          const day = DAYS[Math.floor(index / 8)]
-          const period = PERIODS[index % 8]
-
-          return progress.some(
-            (item) =>
-              item.day === day &&
-              item.period === period
-          )
+      const occupiedSlots = new Set<string>()
+      for (const entry of latestEntries) {
+        if (entry.teacherId === id) {
+          occupiedSlots.add(`${entry.day}:${entry.period}`)
         }
-      ).findIndex((completed) => !completed)
+      }
+      for (const item of progress) {
+        occupiedSlots.add(`${item.day}:${item.period}`)
+      }
+      const firstIncomplete = Array.from({ length: 40 }, (_, index) => {
+        const day = DAYS[Math.floor(index / 8)]
+        const period = PERIODS[index % 8]
+        return occupiedSlots.has(`${day}:${period}`)
+      }).findIndex((completed) => !completed)
 
       // Resume at the first incomplete period.
       setCurrentStep(
@@ -637,7 +659,7 @@ const currentLesson = databaseEntries.find(
             Step {currentStep + 1} of 40
           </p>
           <p className="mt-2 text-sm text-green-400">
-  Completed: {savedProgress.length} / 40 periods
+  Completed: {completedCount} / 40 periods
 </p>
 
           {/* Navigation Progress Bar */}
@@ -647,13 +669,13 @@ const currentLesson = databaseEntries.find(
   <div
     className="h-full bg-green-400 transition-all duration-300"
     style={{
-      width: `${(savedProgress.length / 40) * 100}%`,
+      width: `${(completedCount / 40) * 100}%`,
     }}
   />
 </div>
 
 <p className="mt-2 text-right text-sm text-slate-400">
-  {Math.round((savedProgress.length / 40) * 100)}% completed
+  {Math.round((completedCount / 40) * 100)}% completed
 </p>
 
 
