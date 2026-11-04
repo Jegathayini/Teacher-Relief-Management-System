@@ -37,7 +37,7 @@ function ReliefAssignments() {
 
   const [assignments, setAssignments] = useState<ReliefAssignment[]>([])
   const [date, setDate] = useState(getToday)
-  const [databaseStatus, setDatabaseStatus] = useState("Loading SQLite data...")
+  const [databaseStatus, setDatabaseStatus] = useState("Loading Supabase data...")
   const [error, setError] = useState("")
   const [saving, setSaving] = useState(false)
 
@@ -60,11 +60,11 @@ setTeachers(loadedTeachers)
 setTimetables(loadedTimetables)
 setAbsences(loadedAbsences)
 setAssignments(loadedAssignments)
-        setDatabaseStatus("Connected to SQLite")
+        setDatabaseStatus("Connected to Supabase")
       } catch (cause) {
         console.error("Failed to load relief data:", cause)
-        setDatabaseStatus("SQLite connection failed")
-        setError("Could not load teachers, timetables and absences from SQLite.")
+        setDatabaseStatus("Supabase connection failed")
+        setError("Could not load teachers, timetables and absences from Supabase.")
       }
     }
     void loadData()
@@ -171,7 +171,7 @@ async function handleRemoveAssignment(assignmentId: string) {
           Database: {databaseStatus}
         </p>
         <p className="mt-1 text-sm text-amber-300">
-          Relief assignments are loaded from SQLite. New assignments are saved to the database.
+          Relief assignments are loaded from Supabase. New assignments are saved to the database.
         </p>
       </div>
 
@@ -242,14 +242,14 @@ async function handleRemoveAssignment(assignmentId: string) {
           Lessons Requiring Relief
         </h2>
 
-        {databaseStatus !== "Connected to SQLite" ? (
+        {databaseStatus !== "Connected to Supabase" ? (
           <div className="rounded-xl bg-slate-800 p-6 text-slate-300">
-            Waiting for SQLite data. Check that Flask is running if this persists.
+            Waiting for Supabase data. Check that Flask is running if this persists.
           </div>
         ) : affectedLessons.length === 0 ? (
           <div className="rounded-xl bg-slate-800 p-6 text-slate-300">
             No affected lessons found for this date.
-            Check that absences and weekly timetables have been recorded in SQLite.
+            Check that absences and weekly timetables have been recorded in Supabase.
           </div>
         ) : (
           affectedLessons.map((entry) => {

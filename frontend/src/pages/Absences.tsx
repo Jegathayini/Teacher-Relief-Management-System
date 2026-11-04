@@ -30,7 +30,7 @@ function Absences() {
   const [teachers, setTeachers] = useState<Teacher[]>([])
   const [timetables, setTimetables] = useState<TimetableEntry[]>([])
   const [absences, setAbsences] = useState<Absence[]>([])
-  const [databaseStatus, setDatabaseStatus] = useState("Loading SQLite data...")
+  const [databaseStatus, setDatabaseStatus] = useState("Loading Supabase data...")
   const [assignments, setAssignments] = useState<ReliefAssignment[]>([])
   const [isDeleting, setIsDeleting] = useState(false)
 
@@ -59,10 +59,10 @@ useEffect(() => {
       setTimetables(databaseTimetables)
       setAbsences(databaseAbsences)
       setAssignments(databaseAssignments)
-      setDatabaseStatus("Connected to SQLite")
+      setDatabaseStatus("Connected to Supabase")
     } catch (error) {
       console.error("Failed to load absence data:", error)
-      setDatabaseStatus("SQLite connection failed")
+      setDatabaseStatus("Supabase connection failed")
     }
   }
 
@@ -90,8 +90,8 @@ async function handleSubmit(event: FormEvent<HTMLFormElement>) {
   setError("")
   setMessage("")
 
-  if (databaseStatus !== "Connected to SQLite") {
-    setError("SQLite is not connected.")
+  if (databaseStatus !== "Connected to Supabase") {
+    setError("Supabase is not connected.")
     return
   }
 
@@ -120,7 +120,7 @@ async function handleSubmit(event: FormEvent<HTMLFormElement>) {
     return
   }
 
-  // Check relief assignments currently stored in SQLite.
+  // Check relief assignments currently stored in Supabase.
   let currentAssignments: ReliefAssignment[]
   try {
     currentAssignments = await fetchReliefAssignments()
@@ -158,7 +158,7 @@ async function handleSubmit(event: FormEvent<HTMLFormElement>) {
 
     setTeacherId("")
     setReason("")
-    setMessage("Teacher absence saved to SQLite successfully.")
+    setMessage("Teacher absence saved to Supabase successfully.")
   } catch (error) {
     setError(
       error instanceof Error
@@ -189,7 +189,7 @@ async function handleRemove(absence: Absence) {
     ])
     setAbsences(updatedAbsences)
     setAssignments(updatedAssignments)
-    setMessage("Absence record removed from SQLite successfully.")
+    setMessage("Absence record removed from Supabase successfully.")
   } catch (removeError) {
     setError(removeError instanceof Error ? removeError.message : "Failed to remove absence.")
     // Refresh in case deletion succeeded but the subsequent reload failed.
@@ -357,7 +357,7 @@ async function handleRemove(absence: Absence) {
 
         <button
   type="submit"
-  disabled={isSaving || databaseStatus !== "Connected to SQLite"}
+  disabled={isSaving || databaseStatus !== "Connected to Supabase"}
   className="rounded-lg bg-cyan-500 px-5 py-3 font-semibold text-slate-950 hover:bg-cyan-400 disabled:cursor-not-allowed disabled:opacity-40"
 >
   {isSaving ? "Saving..." : "Mark Absent"}
@@ -401,7 +401,7 @@ async function handleRemove(absence: Absence) {
                     </div>
 
                     <button
-                      type="button" disabled={isDeleting || databaseStatus !== "Connected to SQLite"} title="Remove this SQLite absence record"
+                      type="button" disabled={isDeleting || databaseStatus !== "Connected to Supabase"} title="Remove this Supabase absence record"
                       onClick={() => handleRemove(absence)}
                       className="rounded-lg bg-red-600 px-3 py-2 text-sm text-white hover:bg-red-500 disabled:cursor-not-allowed disabled:opacity-40"
                     >
