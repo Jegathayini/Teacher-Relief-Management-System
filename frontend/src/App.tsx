@@ -9,13 +9,14 @@ import Teachers from "./pages/Teachers"
 import Timetables from "./pages/Timetables"
 import Absences from "./pages/Absences"
 import ReliefAssignments from "./pages/ReliefAssignments"
-
+import FullSummary from "./pages/FullSummary"
 type Page =
   | "dashboard"
   | "teachers"
   | "timetables"
   | "absences"
   | "relief"
+  | "summary"
 
 const navigation: {
   id: Page
@@ -26,7 +27,8 @@ const navigation: {
   { id: "teachers", label: "Teachers", icon: "👩‍🏫" },
   { id: "timetables", label: "Timetables", icon: "📅" },
   { id: "absences", label: "Absences", icon: "📋" },
-  { id: "relief", label: "Relief Assignments", icon: "🔄" }
+  { id: "relief", label: "Relief Assignments", icon: "🔄" },
+  { id: "summary", label: "Full School Summary", icon: "📑" }
 ]
 
 function App() {
@@ -106,6 +108,8 @@ function App() {
         return <Absences />
       case "relief":
         return <ReliefAssignments />
+      case "summary":
+        return <FullSummary />
       default:
         return <Dashboard />
     }
