@@ -1,4 +1,3 @@
-
 import GradeClassManager from "../components/GradeClassManager"
 import { useEffect, useState } from "react"
 import AcademicYearManager from "../components/AcademicYearManager"
@@ -70,20 +69,12 @@ function Dashboard() {
   useEffect(() => {
     let cancelled = false
     setDailyStats(null)
-
-    void fetchCloudDashboardStats(date)
-      .then((stats) => {
-        if (!cancelled) setDailyStats(stats)
-      })
-      .catch((error) => {
-        if (!cancelled) {
-          console.error("Daily statistics unavailable:", error)
-        }
-      })
-
-    return () => {
-      cancelled = true
-    }
+    void fetchCloudDashboardStats(date).then((stats) => {
+      if (!cancelled) setDailyStats(stats)
+    }).catch((error) => {
+      if (!cancelled) console.error("Daily statistics unavailable:", error)
+    })
+    return () => { cancelled = true }
   }, [date])
 
   const connected = backendStatus === "connected"

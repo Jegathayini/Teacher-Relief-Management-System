@@ -1,4 +1,3 @@
-
 """Authenticated, school-scoped cloud operations for ReliefMS."""
 from datetime import date
 from uuid import uuid4

@@ -1,6 +1,6 @@
 import type { TimetableEntry } from "../types"
 
-const API_BASE_URL = "http://127.0.0.1:5000"
+import { API_BASE_URL, authenticatedFetch } from "./api"
 
 type UpdateTimetablePeriodRequest = {
   teacherId: string
@@ -20,8 +20,8 @@ type UpdateTimetablePeriodResponse = {
 export async function updateTimetablePeriod(
   data: UpdateTimetablePeriodRequest
 ): Promise<UpdateTimetablePeriodResponse> {
-  const response = await fetch(
-    `${API_BASE_URL}/api/timetable-period`,
+  const response = await authenticatedFetch(
+    `${API_BASE_URL}/api/cloud/v2/timetable-period`,
     {
       method: "PUT",
       headers: {

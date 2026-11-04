@@ -1,4 +1,5 @@
-const API_BASE_URL = "http://127.0.0.1:5000"
+export const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || "http://127.0.0.1:5000"
+const CLOUD_V2 = "/api/cloud/v2"
 
 
 import { supabase } from "../lib/supabase"
@@ -14,6 +15,13 @@ export async function getAuthenticatedHeaders(): Promise<HeadersInit> {
     Authorization: `Bearer ${data.session.access_token}`,
     "Content-Type": "application/json",
   }
+}
+
+export async function authenticatedFetch(input: RequestInfo | URL, init: RequestInit = {}): Promise<Response> {
+  const authHeaders = await getAuthenticatedHeaders()
+  const headers = new Headers(init.headers)
+  new Headers(authHeaders).forEach((value, key) => headers.set(key, value))
+  return fetch(input, { ...init, headers })
 }
 
 export interface HealthResponse {
@@ -37,7 +45,7 @@ export async function checkBackendHealth(): Promise<HealthResponse> {
 import type { Teacher,TimetableEntry, Absence,ReliefAssignment } from "../types"
 
 export async function fetchTeachers(): Promise<Teacher[]> {
-  const response = await fetch(`${API_BASE_URL}/api/teachers`)
+  const response = await authenticatedFetch(`${API_BASE_URL}${CLOUD_V2}/teachers`)
 
   if (!response.ok) {
     throw new Error(
@@ -50,7 +58,7 @@ export async function fetchTeachers(): Promise<Teacher[]> {
 
 
 export async function fetchTimetables(): Promise<TimetableEntry[]> {
-  const response = await fetch(`${API_BASE_URL}/api/timetables`)
+  const response = await authenticatedFetch(`${API_BASE_URL}${CLOUD_V2}/timetables`)
 
   if (!response.ok) {
     throw new Error(
@@ -67,8 +75,8 @@ export async function fetchTimetables(): Promise<TimetableEntry[]> {
 export async function createTimetable(
   entry: Omit<TimetableEntry, "id">
 ): Promise<TimetableEntry> {
-  const response = await fetch(
-    `${API_BASE_URL}/api/timetables`,
+  const response = await authenticatedFetch(
+    `${API_BASE_URL}${CLOUD_V2}/timetables`,
     {
       method: "POST",
       headers: {
@@ -93,10 +101,10 @@ export async function createTimetable(
 
 
 export async function fetchAbsences(): Promise<Absence[]> {
-  const response = await fetch(`${API_BASE_URL}/api/absences`)
+  const response = await authenticatedFetch(`${API_BASE_URL}${CLOUD_V2}/absences`)
 
   if (!response.ok) {
-    throw new Error("Failed to fetch absences from SQLite.")
+    throw new Error("Failed to fetch cloud absences.")
   }
 
   return (await response.json()) as Absence[]
@@ -105,7 +113,7 @@ export async function fetchAbsences(): Promise<Absence[]> {
 export async function createAbsence(
   absence: Omit<Absence, "id">
 ): Promise<Absence> {
-  const response = await fetch(`${API_BASE_URL}/api/absences`, {
+  const response = await authenticatedFetch(`${API_BASE_URL}${CLOUD_V2}/absences`, {
     method: "POST",
     headers: {
       "Content-Type": "application/json"
@@ -117,7 +125,7 @@ export async function createAbsence(
 
   if (!response.ok) {
     throw new Error(
-      result.error || "Failed to save absence to SQLite."
+      result.error || "Failed to save cloud absence."
     )
   }
 
@@ -126,10 +134,10 @@ export async function createAbsence(
 
 
 export async function fetchReliefAssignments(): Promise<ReliefAssignment[]> {
-  const response = await fetch(`${API_BASE_URL}/api/relief-assignments`)
+  const response = await authenticatedFetch(`${API_BASE_URL}${CLOUD_V2}/relief-assignments`)
 
   if (!response.ok) {
-    throw new Error("Failed to load relief assignments from SQLite.")
+    throw new Error("Failed to load cloud relief assignments.")
   }
 
   return response.json()
@@ -138,7 +146,7 @@ export async function fetchReliefAssignments(): Promise<ReliefAssignment[]> {
 export async function createReliefAssignment(
   assignment: Omit<ReliefAssignment, "id">
 ): Promise<ReliefAssignment> {
-  const response = await fetch(`${API_BASE_URL}/api/relief-assignments`, {
+  const response = await authenticatedFetch(`${API_BASE_URL}${CLOUD_V2}/relief-assignments`, {
     method: "POST",
     headers: {
       "Content-Type": "application/json"
@@ -164,8 +172,8 @@ export async function createReliefAssignment(
 export async function deleteReliefAssignment(
   assignmentId: string
 ): Promise<void> {
-  const response = await fetch(
-    `${API_BASE_URL}/api/relief-assignments/${encodeURIComponent(assignmentId)}`,
+  const response = await authenticatedFetch(
+    `${API_BASE_URL}${CLOUD_V2}/relief-assignments/${encodeURIComponent(assignmentId)}`,
     { method: "DELETE" }
   )
 
@@ -180,8 +188,8 @@ export async function deleteReliefAssignment(
 
 
 export async function deleteAbsence(id: string): Promise<void> {
-  const response = await fetch(
-    `${API_BASE_URL}/api/absences/${encodeURIComponent(id)}`,
+  const response = await authenticatedFetch(
+    `${API_BASE_URL}${CLOUD_V2}/absences/${encodeURIComponent(id)}`,
     { method: "DELETE" }
   )
 
@@ -192,8 +200,8 @@ export async function deleteAbsence(id: string): Promise<void> {
 }
 
 export async function deleteTimetable(id: string): Promise<void> {
-  const response = await fetch(
-    `${API_BASE_URL}/api/timetables/${encodeURIComponent(id)}`,
+  const response = await authenticatedFetch(
+    `${API_BASE_URL}${CLOUD_V2}/timetables/${encodeURIComponent(id)}`,
     { method: "DELETE" }
   )
 
@@ -209,8 +217,8 @@ export async function saveFreePeriod(
   day: string,
   period: number
 ) {
-  const response = await fetch(
-    "http://127.0.0.1:5000/api/timetable-progress/free",
+  const response = await authenticatedFetch(
+    `${API_BASE_URL}${CLOUD_V2}/timetable-progress/free`,
     {
       method: "PUT",
       headers: {
@@ -245,8 +253,8 @@ export type TimetableProgress = {
 export async function fetchTimetableProgress(
   teacherId: string
 ): Promise<TimetableProgress[]> {
-  const response = await fetch(
-    `http://127.0.0.1:5000/api/timetable-progress/${encodeURIComponent(teacherId)}`
+  const response = await authenticatedFetch(
+    `${API_BASE_URL}${CLOUD_V2}/timetable-progress/${encodeURIComponent(teacherId)}`
   )
 
   if (!response.ok) {
@@ -262,7 +270,7 @@ export type SchoolClass = { id: string; gradeId: string; section: string; name: 
 export type SchoolConfiguration = { grades: SchoolGrade[]; classes: SchoolClass[] }
 
 async function schoolRequest<T>(path: string, options?: RequestInit): Promise<T> {
-  const response = await fetch(`${API_BASE_URL}${path}`, {
+  const response = await authenticatedFetch(`${API_BASE_URL}${path}`, {
     ...options,
     headers: { "Content-Type": "application/json", ...options?.headers },
   })
@@ -270,11 +278,17 @@ async function schoolRequest<T>(path: string, options?: RequestInit): Promise<T>
   if (!response.ok) throw new Error(data.message ?? `Request failed: ${response.status}`)
   return data as T
 }
-export const fetchSchoolConfiguration = () => schoolRequest<SchoolConfiguration>("/api/grades")
-export const createGrade = (name: string) => schoolRequest<SchoolGrade>("/api/grades", { method: "POST", body: JSON.stringify({ name }) })
-export const createSchoolClass = (gradeId: string, section: string) => schoolRequest<SchoolClass>("/api/school-classes", { method: "POST", body: JSON.stringify({ gradeId, section }) })
-export const deleteSchoolClass = (id: string) => schoolRequest<{ message: string }>(`/api/school-classes/${encodeURIComponent(id)}`, { method: "DELETE" })
-export const deleteGrade = (id: string) => schoolRequest<{ message: string }>(`/api/grades/${encodeURIComponent(id)}`, { method: "DELETE" })
+export const fetchSchoolConfiguration = async (): Promise<SchoolConfiguration> => {
+  const data = await fetchCloudConfiguration()
+  return { grades: data.grades, classes: data.classes.map(c => ({
+    id: c.id, gradeId: c.grade_id, section: c.section,
+    name: `${data.grades.find(g => g.id === c.grade_id)?.name ?? "Grade"} ${c.section}`
+  })) }
+}
+export const createGrade = (name: string) => schoolRequest<SchoolGrade>("/api/cloud/grades", { method: "POST", body: JSON.stringify({ name }) })
+export const createSchoolClass = (gradeId: string, section: string) => createCloudClass(gradeId, section).then(c => ({ ...c, gradeId: c.grade_id, name: section }))
+export const deleteSchoolClass = (id: string) => schoolRequest<{ message: string }>(`/api/cloud/classes/${encodeURIComponent(id)}`, { method: "DELETE" })
+export const deleteGrade = (id: string) => schoolRequest<{ message: string }>(`/api/cloud/grades/${encodeURIComponent(id)}`, { method: "DELETE" })
 
 export type AcademicYearStatus = {
   year: number
@@ -285,13 +299,13 @@ export type AcademicYearStatus = {
 }
 
 export async function fetchAcademicYear(): Promise<AcademicYearStatus> {
-  const response = await fetch(`${API_BASE_URL}/api/academic-year`)
+  const response = await authenticatedFetch(`${API_BASE_URL}/api/cloud/academic-year`)
   if (!response.ok) throw new Error("Could not load academic year settings.")
   return response.json() as Promise<AcademicYearStatus>
 }
 
 export async function rolloverAcademicYear(newYear: number, startDate: string, confirmation: string): Promise<void> {
-  const response = await fetch(`${API_BASE_URL}/api/academic-year/rollover`, {
+  const response = await authenticatedFetch(`${API_BASE_URL}/api/cloud/academic-year/rollover`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ newYear, startDate, confirmation })
@@ -305,7 +319,7 @@ export async function rolloverAcademicYear(newYear: number, startDate: string, c
 export async function fetchCloudTeachers(): Promise<Teacher[]> {
   const headers = await getAuthenticatedHeaders()
 
-  const response = await fetch(
+  const response = await authenticatedFetch(
     `${API_BASE_URL}/api/cloud/teachers`,
     { headers }
   )
@@ -331,7 +345,7 @@ export async function createCloudTeacher(
 ): Promise<Teacher> {
   const headers = await getAuthenticatedHeaders()
 
-  const response = await fetch(
+  const response = await authenticatedFetch(
     `${API_BASE_URL}/api/cloud/teachers`,
     {
       method: "POST",
@@ -360,7 +374,7 @@ export async function updateCloudTeacher(
 ): Promise<Teacher> {
   const headers = await getAuthenticatedHeaders()
 
-  const response = await fetch(
+  const response = await authenticatedFetch(
     `${API_BASE_URL}/api/cloud/teachers/${encodeURIComponent(teacherId)}`,
     {
       method: "PUT",
@@ -388,7 +402,7 @@ export async function updateCloudTeacherStatus(
 ): Promise<Teacher> {
   const headers = await getAuthenticatedHeaders()
 
-  const response = await fetch(
+  const response = await authenticatedFetch(
     `${API_BASE_URL}/api/cloud/teachers/${encodeURIComponent(teacherId)}/status`,
     {
       method: "PATCH",
@@ -415,7 +429,7 @@ export async function deleteCloudTeacher(
 ): Promise<void> {
   const headers = await getAuthenticatedHeaders()
 
-  const response = await fetch(
+  const response = await authenticatedFetch(
     `${API_BASE_URL}/api/cloud/teachers/${encodeURIComponent(teacherId)}`,
     {
       method: "DELETE",
@@ -438,7 +452,7 @@ export async function deleteCloudTeacher(
 export async function fetchCloudAcademicYear(): Promise<AcademicYearStatus> {
   const headers = await getAuthenticatedHeaders()
 
-  const response = await fetch(
+  const response = await authenticatedFetch(
     `${API_BASE_URL}/api/cloud/academic-year`,
     {
       method: "GET",
@@ -481,7 +495,7 @@ async function cloudConfigurationRequest<T>(
 ): Promise<T> {
   const headers = await getAuthenticatedHeaders()
 
-  const response = await fetch(`${API_BASE_URL}${path}`, {
+  const response = await authenticatedFetch(`${API_BASE_URL}${path}`, {
     ...options,
     headers: {
       ...headers,
@@ -542,4 +556,19 @@ export function deleteCloudClass(classId: string) {
     `/api/cloud/classes/${encodeURIComponent(classId)}`,
     { method: "DELETE" }
   )
+}
+
+export type CloudDashboardStats = {
+  absentTeachers: number
+  reliefAssigned: number
+  pendingRelief: number
+}
+
+export async function fetchCloudDashboardStats(date: string): Promise<CloudDashboardStats> {
+  const response = await authenticatedFetch(
+    `${API_BASE_URL}${CLOUD_V2}/dashboard?date=${encodeURIComponent(date)}`
+  )
+  const data = await response.json().catch(() => null)
+  if (!response.ok) throw new Error(data?.message ?? "Could not load daily statistics")
+  return data as CloudDashboardStats
 }

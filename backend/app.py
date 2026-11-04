@@ -11,8 +11,6 @@ from io import BytesIO
 import os
 import tempfile
 from postgres_database import get_postgres_connection
-from uuid import uuid4
-
 app = Flask(__name__)
 CORS(
     app,
@@ -41,6 +39,12 @@ def protect_api_routes():
     if request.path == "/api/health":
         return None
 
+    if request.path.startswith("/api/") and not request.path.startswith("/api/cloud/"):
+        return jsonify({"message": "Legacy SQLite API disabled. Use cloud endpoints."}), 410
+
+    if request.path.startswith("/api/cloud/v2/"):
+        return None  # cloud_operations blueprint enforces school admin
+
     if request.path.startswith("/api/"):
         @require_school_admin
         def authenticated_request():
@@ -58,14 +62,6 @@ def home():
         "status": "running",
         "api_health": "/api/health"
     })
-
-# Allow requests from the local React development server
-CORS(app, resources={
-    r"/api/*": {
-        "origins": ["http://localhost:5173", "http://127.0.0.1:5173"]
-    }
-})
-
 
 @app.get("/api/health")
 def health_check():
@@ -1607,9 +1603,25 @@ def archive_cloud_table(cursor, source, archive, school_id, year):
                 sql.SQL("md5(random()::text || clock_timestamp()::text)")
             )
 
+        elif column == "entry_id" and column not in source_columns and "id" in source_columns:
+            insert_columns.append(sql.Identifier(column))
+            select_expressions.append(sql.Identifier("id"))
+
         elif column in source_columns:
             insert_columns.append(sql.Identifier(column))
             select_expressions.append(sql.Identifier(column))
+
+    cursor.execute("""
+        SELECT column_name FROM information_schema.columns
+        WHERE table_schema='public' AND table_name=%s
+          AND is_nullable='NO' AND column_default IS NULL
+          AND is_identity='NO' AND is_generated='NEVER'
+    """, (archive,))
+    required = {row['column_name'] for row in cursor.fetchall()}
+    included = {identifier.string for identifier in insert_columns}
+    missing = required - included
+    if missing:
+        raise ValueError(f"Archive {archive} missing required columns: {sorted(missing)}")
 
     query = sql.SQL("""
         INSERT INTO {archive} ({columns})
@@ -1996,6 +2008,8 @@ def delete_cloud_class(class_id):
     return jsonify({"message": "Class deleted successfully."})
 
 
+from cloud_operations import cloud
+app.register_blueprint(cloud)
+
 if __name__ == "__main__":
-    initialize_database()
-    app.run(host="127.0.0.1", port=5000, debug=True)
+    app.run(host="127.0.0.1", port=5000, debug=os.getenv("FLASK_DEBUG") == "1")

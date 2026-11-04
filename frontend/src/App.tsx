@@ -1,7 +1,6 @@
 
 import { useEffect, useState } from "react"
 import type { Session } from "@supabase/supabase-js"
-import CloudConnectionTest from "./components/CloudConnectionTest"
 import { supabase } from "./lib/supabase"
 import Login from "./pages/Login"
 
@@ -253,7 +252,6 @@ function App() {
           </div>
 
           <main className="mx-auto max-w-7xl p-4 sm:p-6 lg:p-8">
-            {currentPage === "dashboard" && <CloudConnectionTest />}
             {renderPage()}
           </main>
 

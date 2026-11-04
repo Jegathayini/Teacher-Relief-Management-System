@@ -1,4 +1,3 @@
-
 -- Run once in Supabase SQL Editor after reviewing school records.
 -- Initializes missing academic year state for existing schools (2026).
 -- Does not overwrite existing academic year data.
