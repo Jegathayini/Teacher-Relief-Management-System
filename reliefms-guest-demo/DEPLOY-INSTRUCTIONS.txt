@@ -1,0 +1,14 @@
+ReliefMS Guest Preview (same production React pages, read-only fictional data)
+
+This ZIP contains source files, not a precompiled demo. Build it locally first:
+1. Extract ZIP to a separate folder.
+2. In that folder: npm install
+3. Run: npm run build
+4. Copy the CONTENTS of dist/ into your ORIGINAL project at frontend/public/demo/
+5. In your ORIGINAL login page, link to /demo/ (not /demo/index.html required).
+6. Run npm run dev in your ORIGINAL frontend and visit http://localhost:5173/demo/
+7. Deploy original frontend normally via Cloudflare Pages.
+
+The original production frontend is NOT included or modified. This is a separate guest-only React build using copied production UI pages. Guest API is in-memory fictional data only; it contains no Supabase client. No guest mutations are supported.
+
+Caution: Demo date data is fixed to 2026-11-04; choose that date in the dashboard to see absences/relief totals.

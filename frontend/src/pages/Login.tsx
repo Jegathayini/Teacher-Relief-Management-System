@@ -42,19 +42,32 @@ export default function Login() {
   return (
     <main className="flex min-h-screen items-center justify-center bg-slate-950 p-4">
       <div className="w-full max-w-md rounded-2xl border border-slate-700 bg-slate-900 p-8 shadow-xl">
-        <h1 className="text-center text-3xl font-bold text-cyan-400">
-          ReliefMS
-        </h1>
 
-        <p className="mt-2 text-center text-sm text-slate-400">
-          School Administrator Sign In
-        </p>
+        {/* Branding */}
+        <div className="text-center">
+          <h1 className="text-3xl font-bold tracking-tight text-cyan-400">
+            ReliefMS
+          </h1>
 
-        <form onSubmit={handleLogin} className="mt-8 space-y-5">
+          <p className="mt-2 text-sm text-slate-400">
+            Teacher Relief Management System
+          </p>
+
+          <p className="mt-4 text-sm font-medium text-slate-300">
+            School Administrator Sign In
+          </p>
+        </div>
+
+        {/* Administrator Login */}
+        <form onSubmit={handleLogin} className="mt-7 space-y-5">
           <div>
-            <label htmlFor="email" className="mb-2 block text-sm text-slate-300">
+            <label
+              htmlFor="email"
+              className="mb-2 block text-sm text-slate-300"
+            >
               Email
             </label>
+
             <input
               id="email"
               type="email"
@@ -68,9 +81,13 @@ export default function Login() {
           </div>
 
           <div>
-            <label htmlFor="password" className="mb-2 block text-sm text-slate-300">
+            <label
+              htmlFor="password"
+              className="mb-2 block text-sm text-slate-300"
+            >
               Password
             </label>
+
             <input
               id="password"
               type="password"
@@ -84,21 +101,57 @@ export default function Login() {
           </div>
 
           {error && (
-            <p role="alert" className="text-sm text-red-400">{error}</p>
+            <p role="alert" className="text-sm text-red-400">
+              {error}
+            </p>
           )}
 
           {success && (
-            <p role="status" className="text-sm text-green-400">{success}</p>
+            <p role="status" className="text-sm text-green-400">
+              {success}
+            </p>
           )}
 
           <button
             type="submit"
             disabled={loading}
-            className="w-full rounded-lg bg-cyan-500 p-3 font-semibold text-slate-950 hover:bg-cyan-400 disabled:opacity-50"
+            className="w-full rounded-lg bg-cyan-500 p-3 font-semibold text-slate-950 transition-colors hover:bg-cyan-400 disabled:opacity-50"
           >
             {loading ? "Signing in..." : "Sign In"}
           </button>
         </form>
+
+        {/* Divider */}
+        <div className="my-7 flex items-center gap-4">
+          <div className="h-px flex-1 bg-slate-700" />
+          <span className="text-xs uppercase tracking-wider text-slate-500">
+            Or explore
+          </span>
+          <div className="h-px flex-1 bg-slate-700" />
+        </div>
+
+        {/* Guest Demo */}
+        <a
+          href="/demo/index.html"
+          className="flex w-full items-center justify-center gap-3 rounded-lg border border-cyan-500/60 bg-cyan-500/10 px-4 py-3 font-semibold text-cyan-300 transition-all duration-200 hover:border-cyan-400 hover:bg-cyan-500/20 hover:text-cyan-200 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-cyan-400"
+        >
+          <span aria-hidden="true">👁</span>
+          Explore Guest Demo
+          <span aria-hidden="true">→</span>
+        </a>
+
+        <p className="mt-3 text-center text-xs leading-5 text-slate-400">
+          No account required.
+          <br />
+          Explore fictional school data in read-only mode.
+        </p>
+
+        {/* Footer */}
+        <div className="mt-8 border-t border-slate-800 pt-5 text-center">
+          <p className="text-xs text-slate-500">
+            ReliefMS · Smart Teacher Relief Management
+          </p>
+        </div>
       </div>
     </main>
   )
