@@ -60,6 +60,7 @@ export default function Login() {
 
         {/* Administrator Login */}
         <form onSubmit={handleLogin} className="mt-7 space-y-5">
+
           <div>
             <label
               htmlFor="email"
@@ -124,13 +125,15 @@ export default function Login() {
         {/* Divider */}
         <div className="my-7 flex items-center gap-4">
           <div className="h-px flex-1 bg-slate-700" />
+
           <span className="text-xs uppercase tracking-wider text-slate-500">
             Or explore
           </span>
+
           <div className="h-px flex-1 bg-slate-700" />
         </div>
 
-        {/* Guest Demo */}
+        {/* Guest Demo Button */}
         <a
           href="/demo/index.html"
           className="flex w-full items-center justify-center gap-3 rounded-lg border border-cyan-500/60 bg-cyan-500/10 px-4 py-3 font-semibold text-cyan-300 transition-all duration-200 hover:border-cyan-400 hover:bg-cyan-500/20 hover:text-cyan-200 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-cyan-400"
@@ -152,6 +155,7 @@ export default function Login() {
             ReliefMS · Smart Teacher Relief Management
           </p>
         </div>
+
       </div>
     </main>
   )
