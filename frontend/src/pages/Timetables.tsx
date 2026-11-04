@@ -230,7 +230,7 @@ const currentLesson = databaseEntries.find(
     if (!teacherId || isSaving) return
 
     if (databaseStatus !== "Connected to Supabase") {
-      setError("Connect to SQLite before saving.")
+      setError("Connect to Supabase before saving.")
       return
     }
 
@@ -286,7 +286,7 @@ const currentLesson = databaseEntries.find(
     if (!teacherId || isSaving) return
 
     if (databaseStatus !== "Connected to Supabase") {
-      setError("Connect to SQLite before saving.")
+      setError("Connect to Supabase before saving.")
       return
     }
 
@@ -342,7 +342,7 @@ const currentLesson = databaseEntries.find(
         ...previous.filter((item) => item.id !== savedEntry.id), savedEntry,
       ])
 
-      // Refresh from SQLite.
+      // Refresh from Supabase.
       try {
         setDatabaseEntries(await fetchTimetables())
       } catch (refreshError) {
@@ -384,7 +384,7 @@ const currentLesson = databaseEntries.find(
     const cleanSubject = subject.trim()
 
     if (databaseStatus !== "Connected to Supabase") {
-      setError("Connect to SQLite before adding a timetable entry.")
+      setError("Connect to Supabase before adding a timetable entry.")
       return
     }
 
@@ -454,7 +454,7 @@ const currentLesson = databaseEntries.find(
           { day, period, status: "LESSON" },
         ])
       }
-      setSuccess("Timetable entry saved to SQLite successfully.")
+      setSuccess("Timetable entry saved to Supabase successfully.")
     } catch (saveError) {
       setError(
         saveError instanceof Error
@@ -497,7 +497,7 @@ const currentLesson = databaseEntries.find(
         ))
       }
 
-      setSuccess("Timetable entry removed from SQLite successfully.")
+      setSuccess("Timetable entry removed from Supabase successfully.")
 
       try {
         setDatabaseEntries(await fetchTimetables())
@@ -534,7 +534,7 @@ const currentLesson = databaseEntries.find(
 
           {databaseStatus === "Connected to Supabase" && (
             <span className="rounded-lg bg-slate-800 px-3 py-2 text-sm text-slate-300">
-              SQLite Timetable Entries: {databaseEntries.length}
+              Supabase Timetable Entries: {databaseEntries.length}
             </span>
           )}
         </div>
@@ -1008,7 +1008,7 @@ const currentLesson = databaseEntries.find(
                           isSaving ||
                           databaseStatus !== "Connected to Supabase"
                         }
-                        title="Delete SQLite timetable entry"
+                        title="Delete Supabase timetable entry"
                         className="rounded-lg bg-red-600 px-3 py-2 text-xs text-white hover:bg-red-500 disabled:cursor-not-allowed disabled:opacity-40"
                       >
                         {deletingId === entry.id
