@@ -6,25 +6,11 @@ ReliefMS simplifies the process of managing teacher absences and arranging tempo
 
 Built with **React, TypeScript, Tailwind CSS, and Supabase**, ReliefMS focuses on making daily school operations more organized, efficient, and accessible.
 
----
-
-### 🌐 Live Application
+### Live Application
 
 **[Explore ReliefMS](https://teacher-relief-management-system.pages.dev/)**
 
 **[GitHub Repository](https://github.com/Jegathayini/Teacher-Relief-Management-System)**
-
-### 🚀 Try the Interactive Guest Demo
-
-Experience ReliefMS using fictional school data without creating an account.
-
-1. Open the **[ReliefMS Live Demo](https://teacher-relief-management-system.pages.dev/)**.
-2. Click the **Guest Demo** button on the login page.
-3. Explore the system's features using fictional school data.
-
-**No login credentials required!**
-
-The Guest Demo provides an opportunity to explore ReliefMS without accessing real school information.
 
 ---
 
@@ -171,11 +157,11 @@ npm install
 
 ### 3. Configure Environment Variables
 
-Create a `.env.local` file inside the `frontend` directory.
+Create a `.env` file inside the `frontend` directory.
 
 ```env
 VITE_SUPABASE_URL=your_supabase_project_url
-VITE_SUPABASE_PUBLISHABLE_KEY=your_supabase_publishable_key
+VITE_SUPABASE_ANON_KEY=your_supabase_publishable_or_anon_key
 ```
 
 Use the variable names expected by your project's Supabase client configuration.
@@ -229,7 +215,7 @@ ReliefMS is deployed using **Cloudflare Pages**, with **Supabase** providing clo
 
 **Live Website:** https://teacher-relief-management-system.pages.dev/
 
-ReliefMS provides a publicly accessible Guest Demo using fictional school data. Authorized school administrators can securely access the full application through their accounts.
+The deployed application requires authorized access to school administration features.
 
 ## Development Journey
 
@@ -256,8 +242,7 @@ Major development stages included:
 
 ## Developer
 
-**Jegathayini Thiruchchelvam**
-
+**Jegathayini Thiruchchelvam**  
 Computer Science & Engineering Undergraduate  
 University of Moratuwa, Sri Lanka
 
