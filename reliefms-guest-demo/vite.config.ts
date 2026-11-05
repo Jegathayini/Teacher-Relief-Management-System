@@ -1,4 +1,12 @@
-import react from '@vitejs/plugin-react'
-import {defineConfig} from 'vite'
-import tailwindcss from '@tailwindcss/vite'
-export default defineConfig({base:'/demo/index.html',plugins:[react(),tailwindcss()],build:{outDir:'dist'}})
+
+import { defineConfig } from "vite"
+import react from "@vitejs/plugin-react"
+import tailwindcss from "@tailwindcss/vite"
+
+export default defineConfig({
+  base: "/Teacher-Relief-Management-System/",
+  plugins: [react(), tailwindcss()],
+  build: {
+    outDir: "dist",
+  },
+})
