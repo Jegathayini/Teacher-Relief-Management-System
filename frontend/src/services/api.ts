@@ -507,26 +507,57 @@ export async function fetchTimetableProgress(teacherId: string): Promise<Timetab
   return (data ?? []) as TimetableProgress[];
 }
 
-// =====================================================
-// ABSENCES - SUPABASE
-// =====================================================
-
 export async function fetchAbsences(): Promise<Absence[]> {
-  const schoolId = await getAdminSchoolId();
-  const { data, error } = await supabase.from("absences")
-    .select("id, teacher_id, date, reason").eq("school_id", schoolId)
-    .order("date", { ascending: false });
-  if (error) throw new Error(error.message);
-  return (data ?? []).map(r => ({ id: r.id, teacherId: r.teacher_id,
-    date: r.date, reason: r.reason }));
+  const schoolId = await getAdminSchoolId()
+
+  const { data, error } = await supabase
+    .from("absences")
+    .select("id, teacher_id, date, reason, absent_periods")
+    .eq("school_id", schoolId)
+    .order("date", { ascending: false })
+
+  if (error) {
+    throw new Error(`Failed to load absences: ${error.message}`)
+  }
+
+  return (data ?? []).map((row) => ({
+    id: row.id,
+    teacherId: row.teacher_id,
+    date: row.date,
+    reason: row.reason ?? "",
+    absentPeriods: row.absent_periods ?? [1, 2, 3, 4, 5, 6, 7, 8],
+  }))
 }
 
-export async function createAbsence(absence: Omit<Absence, "id">): Promise<Absence> {
-  const { data, error } = await supabase.rpc("create_school_absence", {
-    p_teacher_id: absence.teacherId, p_date: absence.date,
-    p_reason: absence.reason ?? "",
-  });
-  return requireResult(data as Absence | null, error, "Failed to create absence");
+export async function createAbsence(
+  absence: Omit<Absence, "id">
+): Promise<Absence> {
+  const { data, error } = await supabase.rpc(
+    "create_school_absence",
+    {
+      p_teacher_id: absence.teacherId,
+      p_date: absence.date,
+      p_reason: absence.reason ?? "",
+      p_absent_periods: absence.absentPeriods,
+    }
+  )
+
+  if (error) {
+    throw new Error(`Failed to create absence: ${error.message}`)
+  }
+
+  if (!data) {
+    throw new Error("No absence record returned from Supabase.")
+  }
+
+  // The RPC returns camelCase fields.
+  return {
+    id: data.id,
+    teacherId: data.teacherId,
+    date: data.date,
+    reason: data.reason ?? "",
+    absentPeriods: data.absentPeriods,
+  }
 }
 
 export async function deleteAbsence(id: string): Promise<void> {
@@ -639,4 +670,30 @@ export async function fetchSchoolReliefCounts(): Promise<Record<string, number>>
     counts[row.teacherId] = Number(row.totalReliefs);
   }
   return counts;
+}
+
+
+export async function replaceReliefAssignment(
+  assignmentId: string,
+  newReliefTeacherId: string
+): Promise<void> {
+  const { data, error } = await supabase.rpc(
+    "replace_relief_assignment",
+    {
+      p_assignment_id: assignmentId,
+      p_new_relief_teacher_id: newReliefTeacherId,
+    }
+  )
+
+  if (error) {
+    throw new Error(
+      `Failed to replace relief teacher: ${error.message}`
+    )
+  }
+
+  if (data === null || data === undefined) {
+    throw new Error(
+      "Supabase did not confirm the relief replacement."
+    )
+  }
 }

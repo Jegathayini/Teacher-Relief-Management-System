@@ -9,6 +9,7 @@ import Teachers from "./pages/Teachers"
 import Timetables from "./pages/Timetables"
 import Absences from "./pages/Absences"
 import ReliefAssignments from "./pages/ReliefAssignments"
+import UnplannedReliefs from "./pages/UnplannedReliefs"
 import FullSummary from "./pages/FullSummary"
 type Page =
   | "dashboard"
@@ -16,6 +17,7 @@ type Page =
   | "timetables"
   | "absences"
   | "relief"
+  | "unplanned"
   | "summary"
 
 const navigation: {
@@ -28,6 +30,11 @@ const navigation: {
   { id: "timetables", label: "Timetables", icon: "📅" },
   { id: "absences", label: "Absences", icon: "📋" },
   { id: "relief", label: "Relief Assignments", icon: "🔄" },
+  {
+    id: "unplanned",
+    label: "Unplanned Absences & Relief",
+    icon: "🚨"
+  },
   { id: "summary", label: "Full School Summary", icon: "📑" }
 ]
 
@@ -108,6 +115,8 @@ function App() {
         return <Absences />
       case "relief":
         return <ReliefAssignments />
+      case "unplanned":
+        return <UnplannedReliefs />
       case "summary":
         return <FullSummary />
       default:

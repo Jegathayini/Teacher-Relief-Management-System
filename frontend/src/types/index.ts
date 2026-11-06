@@ -20,6 +20,7 @@ export type Absence = {
   teacherId: string
   date: string
   reason: string
+  absentPeriods: number[]
 }
 
 export type ReliefAssignment = {

@@ -22,11 +22,25 @@ type ReliefRequest = {
 
 function getDayName(date: string): string {
   const [year, month, day] = date.split("-").map(Number)
-  const dateObject = new Date(year, month - 1, day)
 
-  return dateObject.toLocaleDateString("en-US", {
-    weekday: "long"
-  })
+  return new Date(year, month - 1, day).toLocaleDateString(
+    "en-US",
+    { weekday: "long" }
+  )
+}
+
+export function isTeacherAbsentDuringPeriod(
+  teacherId: string,
+  date: string,
+  period: number,
+  absences: Absence[]
+): boolean {
+  return absences.some(
+    (absence) =>
+      absence.teacherId === teacherId &&
+      absence.date === date &&
+      absence.absentPeriods.includes(period)
+  )
 }
 
 export function getReliefSuggestions(
@@ -34,18 +48,11 @@ export function getReliefSuggestions(
   teachers: Teacher[],
   timetables: TimetableEntry[],
   absences: Absence[],
-  assignments: ReliefAssignment[]
+  assignments: ReliefAssignment[],
+  lifetimeCounts: Record<string, number> = {}
 ): ReliefSuggestion[] {
   const dayName = getDayName(request.date)
 
-  // Teachers absent on the selected date
-  const absentTeacherIds = new Set(
-    absences
-      .filter((absence) => absence.date === request.date)
-      .map((absence) => absence.teacherId)
-  )
-
-  // Teachers who have a regular class during this period
   const busyTeacherIds = new Set(
     timetables
       .filter(
@@ -56,7 +63,6 @@ export function getReliefSuggestions(
       .map((entry) => entry.teacherId)
   )
 
-  // Teachers already assigned relief during this period
   const assignedTeacherIds = new Set(
     assignments
       .filter(
@@ -68,15 +74,19 @@ export function getReliefSuggestions(
   )
 
   return teachers
-    .filter((teacher) => {
-      return (
+    .filter(
+      (teacher) =>
         teacher.active &&
         teacher.id !== request.absentTeacherId &&
-        !absentTeacherIds.has(teacher.id) &&
+        !isTeacherAbsentDuringPeriod(
+          teacher.id,
+          request.date,
+          request.period,
+          absences
+        ) &&
         !busyTeacherIds.has(teacher.id) &&
         !assignedTeacherIds.has(teacher.id)
-      )
-    })
+    )
     .map((teacher) => {
       const reliefCount = assignments.filter(
         (assignment) =>
@@ -84,16 +94,17 @@ export function getReliefSuggestions(
           assignment.reliefTeacherId === teacher.id
       ).length
 
-      // Lifetime total is calculated across ALL dates, including previous years.
-      // The academic-year rollover preserves these assignment records in SQLite.
-      const totalReliefCount = assignments.filter(
-        (assignment) => assignment.reliefTeacherId === teacher.id
-      ).length
+      const totalReliefCount =
+        lifetimeCounts[teacher.id] ??
+        assignments.filter(
+          (assignment) =>
+            assignment.reliefTeacherId === teacher.id
+        ).length
 
       const subjectMatch = teacher.subjects.some(
         (subject) =>
-          subject.toLowerCase() ===
-          request.subject.toLowerCase()
+          subject.trim().toLowerCase() ===
+          request.subject.trim().toLowerCase()
       )
 
       return {
@@ -104,17 +115,14 @@ export function getReliefSuggestions(
       }
     })
     .sort((a, b) => {
-      // Prefer teachers with fewer relief assignments
       if (a.reliefCount !== b.reliefCount) {
         return a.reliefCount - b.reliefCount
       }
 
-      // On equal daily workload, favor the teacher with fewer lifetime assignments.
       if (a.totalReliefCount !== b.totalReliefCount) {
         return a.totalReliefCount - b.totalReliefCount
       }
 
-      // Then prefer teachers who teach the same subject
       if (a.subjectMatch !== b.subjectMatch) {
         return a.subjectMatch ? -1 : 1
       }
@@ -129,14 +137,16 @@ export function isReliefConflict(
   period: number,
   timetables: TimetableEntry[],
   absences: Absence[],
-  assignments: ReliefAssignment[]
+  assignments: ReliefAssignment[],
+  excludeAssignmentId?: string
 ): boolean {
   const dayName = getDayName(date)
 
-  const isAbsent = absences.some(
-    (absence) =>
-      absence.teacherId === teacherId &&
-      absence.date === date
+  const isAbsent = isTeacherAbsentDuringPeriod(
+    teacherId,
+    date,
+    period,
+    absences
   )
 
   const hasRegularClass = timetables.some(
@@ -150,7 +160,8 @@ export function isReliefConflict(
     (assignment) =>
       assignment.reliefTeacherId === teacherId &&
       assignment.date === date &&
-      assignment.period === period
+      assignment.period === period &&
+      assignment.id !== excludeAssignmentId
   )
 
   return isAbsent || hasRegularClass || hasReliefAssignment
