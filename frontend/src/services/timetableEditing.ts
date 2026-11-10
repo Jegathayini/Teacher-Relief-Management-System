@@ -1,45 +1,48 @@
-import type { TimetableEntry } from "../types"
 
-import { API_BASE_URL, authenticatedFetch } from "./api"
+import { supabase } from "../lib/supabase";
+import type { TimetableEntry } from "../types";
 
 type UpdateTimetablePeriodRequest = {
-  teacherId: string
-  day: string
-  period: number
-  status: "FREE" | "LESSON"
-  className?: string
-  subject?: string
-}
+  teacherId: string;
+  day: string;
+  period: number;
+  status: "FREE" | "LESSON";
+  className?: string;
+  subject?: string;
+};
 
 type UpdateTimetablePeriodResponse = {
-  message?: string
-  status: "FREE" | "LESSON"
-  entry?: TimetableEntry
-}
+  message?: string;
+  status: "FREE" | "LESSON";
+  entry?: TimetableEntry;
+};
 
 export async function updateTimetablePeriod(
   data: UpdateTimetablePeriodRequest
 ): Promise<UpdateTimetablePeriodResponse> {
-  const response = await authenticatedFetch(
-    `${API_BASE_URL}/api/cloud/v2/timetable-period`,
+  const { data: result, error } = await supabase.rpc(
+    "update_school_timetable_period",
     {
-      method: "PUT",
-      headers: {
-        "Content-Type": "application/json",
-      },
-      body: JSON.stringify(data),
+      p_teacher_id: data.teacherId,
+      p_day: data.day,
+      p_period: data.period,
+      p_status: data.status,
+      p_class_name: data.className ?? null,
+      p_subject: data.subject ?? null,
     }
-  )
+  );
 
-  const result = await response.json()
-
-  if (!response.ok) {
+  if (error) {
     throw new Error(
-      result.message ||
-      result.error ||
-      "Failed to update timetable period."
-    )
+      `Failed to update timetable period: ${error.message}`
+    );
   }
 
-  return result as UpdateTimetablePeriodResponse
+  if (!result) {
+    throw new Error(
+      "Supabase did not return a timetable update result."
+    );
+  }
+
+  return result as UpdateTimetablePeriodResponse;
 }
