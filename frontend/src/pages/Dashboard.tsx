@@ -1,4 +1,3 @@
-
 import GradeClassManager from "../components/GradeClassManager"
 import { useEffect, useState } from "react"
 import AcademicYearManager from "../components/AcademicYearManager"
@@ -10,6 +9,7 @@ import {
 } from "../services/api"
 import type { CloudDashboardStats } from "../services/api"
 import type { Teacher, Absence, ReliefAssignment } from "../types"
+import { isValidIsoDate } from "../utils/reliefEngine"
 
 function getToday(): string {
   const now = new Date()
@@ -62,19 +62,30 @@ function Dashboard() {
     }
 
     void loadTeachers()
-    return () => { cancelled = true }
+    return () => {
+      cancelled = true
+    }
   }, [])
 
   useEffect(() => {
     let cancelled = false
 
-    setDailyLoading(true)
-    setDailyStats(null)
-    setDailyAbsences([])
-    setDailyReliefs([])
-    setDailyError("")
-
     async function loadDailyData() {
+      if (!isValidIsoDate(date)) {
+        setDailyStats(null)
+        setDailyAbsences([])
+        setDailyReliefs([])
+        setDailyError("Please select a valid date.")
+        setDailyLoading(false)
+        return
+      }
+
+      setDailyLoading(true)
+      setDailyStats(null)
+      setDailyAbsences([])
+      setDailyReliefs([])
+      setDailyError("")
+
       try {
         const [stats, absences, reliefs] = await Promise.all([
           fetchCloudDashboardStats(date),
@@ -85,8 +96,8 @@ function Dashboard() {
         if (cancelled) return
 
         setDailyStats(stats)
-        setDailyAbsences(absences.filter(a => a.date === date))
-        setDailyReliefs(reliefs.filter(r => r.date === date))
+        setDailyAbsences(absences.filter((a) => a.date === date))
+        setDailyReliefs(reliefs.filter((r) => r.date === date))
       } catch (error) {
         if (cancelled) return
 
@@ -102,16 +113,18 @@ function Dashboard() {
     }
 
     void loadDailyData()
-    return () => { cancelled = true }
+    return () => {
+      cancelled = true
+    }
   }, [date])
 
   const connected = backendStatus === "connected"
   const totalTeachers = teachers.length
-  const activeTeachers = teachers.filter(t => t.active).length
-  const inactiveTeachers = teachers.filter(t => !t.active).length
+  const activeTeachers = teachers.filter((t) => t.active).length
+  const inactiveTeachers = teachers.filter((t) => !t.active).length
 
   const teacherNames = new Map(
-    teachers.map(t => [t.id, t.name])
+    teachers.map((t) => [t.id, t.name])
   )
 
   function getTeacherName(id: string): string {
@@ -147,7 +160,6 @@ function Dashboard() {
 
   return (
     <section className="w-full min-w-0 space-y-6">
-
       {/* Dashboard Header */}
       <div className="flex flex-col gap-5 xl:flex-row xl:items-center xl:justify-between">
         <div className="min-w-0">
@@ -170,13 +182,15 @@ function Dashboard() {
                   : "border-slate-700 bg-slate-800 text-slate-400"
             }`}
           >
-            <span className={`h-2 w-2 rounded-full ${
-              connected
-                ? "bg-green-400"
-                : backendStatus === "disconnected"
-                  ? "bg-red-400"
-                  : "bg-amber-400"
-            }`} />
+            <span
+              className={`h-2 w-2 rounded-full ${
+                connected
+                  ? "bg-green-400"
+                  : backendStatus === "disconnected"
+                    ? "bg-red-400"
+                    : "bg-amber-400"
+              }`}
+            />
 
             <span>
               {connected
@@ -198,7 +212,7 @@ function Dashboard() {
               id="dashboard-date"
               type="date"
               value={date}
-              onChange={event => setDate(event.target.value)}
+              onChange={(event) => setDate(event.target.value)}
               className="rounded-lg border border-slate-600 bg-slate-800 px-3 py-2 text-sm text-white outline-none focus:border-cyan-500"
             />
           </div>
@@ -219,7 +233,7 @@ function Dashboard() {
 
       {/* Dashboard Summary Cards */}
       <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
-        {summaryCards.map(card => (
+        {summaryCards.map((card) => (
           <div
             key={card.title}
             className="rounded-xl border border-slate-700 bg-slate-800 p-5"
@@ -253,7 +267,7 @@ function Dashboard() {
             { title: "Total Teachers", count: totalTeachers, color: "text-white" },
             { title: "Active Teachers", count: activeTeachers, color: "text-green-400" },
             { title: "Inactive Teachers", count: inactiveTeachers, color: "text-amber-400" },
-          ].map(item => (
+          ].map((item) => (
             <div key={item.title} className="rounded-lg bg-slate-700 p-4">
               <p className="text-sm text-slate-300">{item.title}</p>
               <p className={`mt-2 text-2xl font-bold ${item.color}`}>
@@ -269,10 +283,9 @@ function Dashboard() {
 
       {/* Daily Absences and Relief Assignments */}
       <div className="grid gap-6 lg:grid-cols-2">
-
         <div className="rounded-xl border border-slate-700 bg-slate-800 p-5">
           <h2 className="mb-4 text-lg font-semibold text-white">
-            Absent Teachers — {date}
+            Absent Teachers — {date || "No date selected"}
           </h2>
 
           {dailyLoading ? (
@@ -285,13 +298,16 @@ function Dashboard() {
             </p>
           ) : (
             <div className="space-y-3">
-              {dailyAbsences.map(absence => (
+              {dailyAbsences.map((absence) => (
                 <div
                   key={absence.id}
                   className="rounded-lg border border-slate-600 bg-slate-700 p-3"
                 >
                   <p className="font-semibold text-white">
                     {getTeacherName(absence.teacherId)}
+                  </p>
+                  <p className="mt-1 text-xs text-cyan-300">
+                    Absent periods: {absence.absentPeriods.join(", ")}
                   </p>
                   <p className="mt-1 text-sm text-slate-300">
                     Reason: {absence.reason || "Not specified"}
@@ -304,7 +320,7 @@ function Dashboard() {
 
         <div className="rounded-xl border border-slate-700 bg-slate-800 p-5">
           <h2 className="mb-4 text-lg font-semibold text-white">
-            Relief Assignments — {date}
+            Relief Assignments — {date || "No date selected"}
           </h2>
 
           {dailyLoading ? (
@@ -317,7 +333,7 @@ function Dashboard() {
             </p>
           ) : (
             <div className="space-y-3">
-              {dailyReliefs.map(relief => (
+              {dailyReliefs.map((relief) => (
                 <div
                   key={relief.id}
                   className="rounded-lg border border-slate-600 bg-slate-700 p-3"
@@ -344,7 +360,7 @@ function Dashboard() {
       {/* Lessons Needing Relief */}
       <div className="rounded-xl border border-slate-700 bg-slate-800 p-5">
         <h2 className="mb-4 text-lg font-semibold text-white">
-          Lessons Needing Relief — {date}
+          Lessons Needing Relief — {date || "No date selected"}
         </h2>
 
         {dailyLoading ? (

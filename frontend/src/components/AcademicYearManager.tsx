@@ -1,5 +1,4 @@
-
-import { useCallback, useEffect, useState } from "react"
+import { useCallback, useEffect, useRef, useState } from "react"
 import {
   fetchCloudAcademicYear,
   rolloverAcademicYear,
@@ -16,6 +15,7 @@ export default function AcademicYearManager() {
   const [resetting, setResetting] = useState(false)
   const [error, setError] = useState("")
   const [success, setSuccess] = useState("")
+  const mountedRef = useRef(true)
 
   const loadAcademicYear = useCallback(async () => {
     setLoading(true)
@@ -23,24 +23,53 @@ export default function AcademicYearManager() {
 
     try {
       const value = await fetchCloudAcademicYear()
+      if (!mountedRef.current) return
       setStatus(value)
       setNewYear(value.year + 1)
       setStartDate(`${value.year + 1}-01-01`)
       setConfirmation("")
     } catch (err) {
+      if (!mountedRef.current) return
       setError(
         err instanceof Error
           ? err.message
           : "Failed to load academic year."
       )
     } finally {
-      setLoading(false)
+      if (mountedRef.current) setLoading(false)
     }
   }, [])
 
   useEffect(() => {
-    void loadAcademicYear()
-  }, [loadAcademicYear])
+    mountedRef.current = true
+
+    async function init() {
+      try {
+        const value = await fetchCloudAcademicYear()
+        if (!mountedRef.current) return
+        setStatus(value)
+        setNewYear(value.year + 1)
+        setStartDate(`${value.year + 1}-01-01`)
+        setConfirmation("")
+        setError("")
+      } catch (err) {
+        if (!mountedRef.current) return
+        setError(
+          err instanceof Error
+            ? err.message
+            : "Failed to load academic year."
+        )
+      } finally {
+        if (mountedRef.current) setLoading(false)
+      }
+    }
+
+    void init()
+
+    return () => {
+      mountedRef.current = false
+    }
+  }, [])
 
   const expectedConfirmation = `RESET ${newYear}`
 
@@ -83,6 +112,7 @@ export default function AcademicYearManager() {
       )
 
       const updated = await fetchCloudAcademicYear()
+      if (!mountedRef.current) return
 
       setStatus(updated)
       setNewYear(updated.year + 1)
@@ -94,13 +124,14 @@ export default function AcademicYearManager() {
         "Refresh the application to load the new timetable."
       )
     } catch (err) {
+      if (!mountedRef.current) return
       setError(
         err instanceof Error
           ? err.message
           : "Academic year rollover failed."
       )
     } finally {
-      setResetting(false)
+      if (mountedRef.current) setResetting(false)
     }
   }
 
@@ -199,7 +230,7 @@ export default function AcademicYearManager() {
             min={2000}
             max={2200}
             value={newYear}
-            onChange={event =>
+            onChange={(event) =>
               setNewYear(Number(event.target.value))
             }
             disabled={loading || resetting}
@@ -212,7 +243,7 @@ export default function AcademicYearManager() {
           <input
             type="date"
             value={startDate}
-            onChange={event =>
+            onChange={(event) =>
               setStartDate(event.target.value)
             }
             disabled={loading || resetting}
@@ -225,7 +256,7 @@ export default function AcademicYearManager() {
           <input
             type="text"
             value={confirmation}
-            onChange={event =>
+            onChange={(event) =>
               setConfirmation(event.target.value)
             }
             placeholder={expectedConfirmation}
@@ -234,6 +265,14 @@ export default function AcademicYearManager() {
           />
         </label>
       </div>
+
+      {status && (!validYear || !validStartDate) && (
+        <p className="text-xs text-amber-300">
+          {!validYear
+            ? `New Year must be ${status.year + 1}.`
+            : `Start Date must be ${newYear}-01-01.`}
+        </p>
+      )}
 
       <div className="flex flex-wrap gap-3">
         <button

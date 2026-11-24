@@ -1,15 +1,12 @@
-
-import { useCallback, useEffect, useState } from "react"
+import { useCallback, useEffect, useRef, useState } from "react"
 import {
-  fetchCloudConfiguration,
-  createCloudGrade,
-  deleteCloudGrade,
   createCloudClass,
+  createCloudGrade,
   deleteCloudClass,
+  deleteCloudGrade,
+  fetchCloudConfiguration,
 } from "../services/api"
-import type {
-  CloudSchoolConfiguration,
-} from "../services/api"
+import type { CloudSchoolConfiguration } from "../services/api"
 
 export default function GradeClassManager() {
   const [configuration, setConfiguration] =
@@ -25,26 +22,53 @@ export default function GradeClassManager() {
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState("")
   const [message, setMessage] = useState("")
+  const mountedRef = useRef(true)
 
   const loadConfiguration = useCallback(async () => {
     try {
       const result = await fetchCloudConfiguration()
+      if (!mountedRef.current) return
       setConfiguration(result)
       setError("")
     } catch (err) {
+      if (!mountedRef.current) return
       setError(
         err instanceof Error
           ? err.message
           : "Failed to load school configuration."
       )
     } finally {
-      setLoading(false)
+      if (mountedRef.current) setLoading(false)
     }
   }, [])
 
   useEffect(() => {
-    void loadConfiguration()
-  }, [loadConfiguration])
+    mountedRef.current = true
+
+    async function init() {
+      try {
+        const result = await fetchCloudConfiguration()
+        if (!mountedRef.current) return
+        setConfiguration(result)
+        setError("")
+      } catch (err) {
+        if (!mountedRef.current) return
+        setError(
+          err instanceof Error
+            ? err.message
+            : "Failed to load school configuration."
+        )
+      } finally {
+        if (mountedRef.current) setLoading(false)
+      }
+    }
+
+    void init()
+
+    return () => {
+      mountedRef.current = false
+    }
+  }, [])
 
   async function runAction(
     action: () => Promise<unknown>,
@@ -59,17 +83,23 @@ export default function GradeClassManager() {
     try {
       await action()
       await loadConfiguration()
-      setMessage(successMessage)
+      if (mountedRef.current) {
+        setMessage(successMessage)
+      }
       return true
     } catch (err) {
-      setError(
-        err instanceof Error
-          ? err.message
-          : "Operation failed."
-      )
+      if (mountedRef.current) {
+        setError(
+          err instanceof Error
+            ? err.message
+            : "Operation failed."
+        )
+      }
       return false
     } finally {
-      setBusy(false)
+      if (mountedRef.current) {
+        setBusy(false)
+      }
     }
   }
 
@@ -103,10 +133,14 @@ export default function GradeClassManager() {
   ) {
     if (!window.confirm(`Delete ${name}?`)) return
 
-    await runAction(
+    const success = await runAction(
       () => deleteCloudGrade(id),
       "Grade deleted successfully."
     )
+
+    if (success && selectedGrade === id) {
+      setSelectedGrade("")
+    }
   }
 
   async function handleDeleteClass(
@@ -271,7 +305,7 @@ export default function GradeClassManager() {
                   const grade = configuration.grades.find(
                     (item) => item.id === schoolClass.grade_id
                   )
-                  const name = `${grade?.name ?? "Unknown grade"} - ${schoolClass.section}`
+                  const name = `${grade?.name ?? "Grade"} ${schoolClass.section}`
 
                   return (
                     <div

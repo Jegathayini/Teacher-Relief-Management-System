@@ -1,9 +1,7 @@
-
 import { useEffect, useState } from "react"
 import type { Session } from "@supabase/supabase-js"
 import { supabase } from "./lib/supabase"
 import Login from "./pages/Login"
-
 import Dashboard from "./pages/Dashboard"
 import Teachers from "./pages/Teachers"
 import Timetables from "./pages/Timetables"
@@ -11,6 +9,7 @@ import Absences from "./pages/Absences"
 import ReliefAssignments from "./pages/ReliefAssignments"
 import UnplannedReliefs from "./pages/UnplannedReliefs"
 import FullSummary from "./pages/FullSummary"
+
 type Page =
   | "dashboard"
   | "teachers"
@@ -33,20 +32,19 @@ const navigation: {
   {
     id: "unplanned",
     label: "Unplanned Absences & Relief",
-    icon: "🚨"
+    icon: "🚨",
   },
-  { id: "summary", label: "Full School Summary", icon: "📑" }
+  { id: "summary", label: "Full School Summary", icon: "📑" },
 ]
 
 function App() {
   const [session, setSession] = useState<Session | null>(null)
   const [checkingSession, setCheckingSession] = useState(true)
-
   const [currentPage, setCurrentPage] =
     useState<Page>("dashboard")
-
   const [menuOpen, setMenuOpen] = useState(false)
   const [signingOut, setSigningOut] = useState(false)
+  const [signOutError, setSignOutError] = useState("")
 
   useEffect(() => {
     let mounted = true
@@ -71,7 +69,6 @@ function App() {
     const { data: listener } =
       supabase.auth.onAuthStateChange((_event, newSession) => {
         if (!mounted) return
-
         setSession(newSession)
         setCheckingSession(false)
       })
@@ -85,15 +82,16 @@ function App() {
   function changePage(page: Page) {
     setCurrentPage(page)
     setMenuOpen(false)
+    setSignOutError("")
   }
 
   async function handleSignOut() {
     setSigningOut(true)
-
+    setSignOutError("")
     const { error } = await supabase.auth.signOut()
 
     if (error) {
-      window.alert("Sign out failed: " + error.message)
+      setSignOutError("Sign out failed: " + error.message)
     } else {
       setSession(null)
       setCurrentPage("dashboard")
@@ -265,6 +263,11 @@ function App() {
           </div>
 
           <main className="mx-auto max-w-7xl p-4 sm:p-6 lg:p-8">
+            {signOutError && (
+              <p role="alert" className="mb-4 rounded-lg border border-red-800 bg-red-950 p-3 text-sm text-red-300">
+                {signOutError}
+              </p>
+            )}
             {renderPage()}
           </main>
 
