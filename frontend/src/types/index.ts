@@ -1,4 +1,3 @@
-
 export type Teacher = {
   id: string
   name: string
@@ -21,6 +20,18 @@ export type Absence = {
   date: string
   reason: string
   absentPeriods: number[]
+}
+
+export type UnavailabilityScope = "date" | "weekly"
+
+export type TeacherUnavailability = {
+  id: string
+  teacherId: string
+  scope: UnavailabilityScope
+  date: string | null
+  day: string | null
+  periods: number[]
+  reason: string
 }
 
 export type ReliefAssignment = {

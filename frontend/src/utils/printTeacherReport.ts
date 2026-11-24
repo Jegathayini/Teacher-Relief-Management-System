@@ -1,4 +1,3 @@
-
 import type {
   Teacher,
   Absence,
@@ -11,6 +10,7 @@ export type TeacherReportInput = {
   type: ReportType
   year: number
   month?: number
+  schoolName?: string
   teachers: Teacher[]
   absences: Absence[]
   reliefs: ReliefAssignment[]
@@ -18,7 +18,7 @@ export type TeacherReportInput = {
 }
 
 function escapeHtml(value: unknown): string {
-  return String(value ?? "").replace(/[&<>"']/g, char => {
+  return String(value ?? "").replace(/[&<>"']/g, (char) => {
     const entities: Record<string, string> = {
       "&": "&amp;",
       "<": "&lt;",
@@ -30,29 +30,38 @@ function escapeHtml(value: unknown): string {
   })
 }
 
-export function printTeacherReport(input: TeacherReportInput) {
+export function printTeacherReport(input: TeacherReportInput): void {
   const {
     type,
     year,
     month,
+    schoolName = "School Administration",
     teachers,
     absences,
     reliefs,
     lifetimeCounts,
   } = input
 
+  if (!Number.isInteger(year) || year < 2000 || year > 2200) {
+    throw new Error("Select a valid report year.")
+  }
+
+  if (
+    type === "monthly" &&
+    (!month || !Number.isInteger(month) || month < 1 || month > 12)
+  ) {
+    throw new Error("Select a valid report month.")
+  }
+
   const monthName =
-    month !== undefined
-      ? new Date(year, month - 1, 1).toLocaleString(
-          "en-US",
-          { month: "long" }
-        )
+    type === "monthly" && month !== undefined
+      ? new Date(year, month - 1, 1).toLocaleString("en-US", {
+          month: "long",
+        })
       : ""
 
   const periodLabel =
-    type === "monthly"
-      ? `${monthName} ${year}`
-      : `Academic Year ${year}`
+    type === "monthly" ? `${monthName} ${year}` : `Academic Year ${year}`
 
   function belongsToPeriod(date: string) {
     const dateYear = Number(date.slice(0, 4))
@@ -64,25 +73,23 @@ export function printTeacherReport(input: TeacherReportInput) {
     )
   }
 
-  const periodAbsences = absences.filter(a =>
-    belongsToPeriod(a.date)
-  )
-
-  const periodReliefs = reliefs.filter(r =>
-    belongsToPeriod(r.date)
-  )
+  const periodAbsences = absences.filter((a) => belongsToPeriod(a.date))
+  const periodReliefs = reliefs.filter((r) => belongsToPeriod(r.date))
 
   const rows = [...teachers]
     .sort((a, b) => a.name.localeCompare(b.name))
     .map((teacher, index) => {
-      const absentDates = new Set(
-        periodAbsences
-          .filter(a => a.teacherId === teacher.id)
-          .map(a => a.date)
+      const teacherAbsences = periodAbsences.filter(
+        (a) => a.teacherId === teacher.id
+      )
+      const absentDates = new Set(teacherAbsences.map((a) => a.date))
+      const absentPeriodsCount = teacherAbsences.reduce(
+        (sum, a) => sum + (a.absentPeriods?.length ?? 8),
+        0
       )
 
       const reliefCount = periodReliefs.filter(
-        r => r.reliefTeacherId === teacher.id
+        (r) => r.reliefTeacherId === teacher.id
       ).length
 
       return {
@@ -90,29 +97,35 @@ export function printTeacherReport(input: TeacherReportInput) {
         name: teacher.name,
         subjects: teacher.subjects.join(", ") || "—",
         absentDays: absentDates.size,
+        absentPeriods: absentPeriodsCount,
         reliefCount,
         lifetime: lifetimeCounts[teacher.id] ?? 0,
       }
     })
 
-  const totalAbsences = rows.reduce(
-    (sum, row) => sum + row.absentDays,
+  const totalAbsentDays = rows.reduce((sum, row) => sum + row.absentDays, 0)
+  const totalAbsentPeriods = rows.reduce(
+    (sum, row) => sum + row.absentPeriods,
     0
   )
-
+  const totalTableReliefs = rows.reduce((sum, row) => sum + row.reliefCount, 0)
   const totalReliefs = periodReliefs.length
+  const totalLifetime = rows.reduce((sum, row) => sum + row.lifetime, 0)
 
   const tableRows = rows
-    .map(row => `
+    .map(
+      (row) => `
       <tr>
         <td>${row.number}</td>
         <td>${escapeHtml(row.name)}</td>
         <td>${escapeHtml(row.subjects)}</td>
         <td class="number">${row.absentDays}</td>
+        <td class="number">${row.absentPeriods}</td>
         <td class="number">${row.reliefCount}</td>
         <td class="number">${row.lifetime}</td>
       </tr>
-    `)
+    `
+    )
     .join("")
 
   const html = `
@@ -246,7 +259,7 @@ export function printTeacherReport(input: TeacherReportInput) {
 </head>
 <body>
   <header>
-    <h1>J/ Manipay Memorial English School</h1>
+    <h1>${escapeHtml(schoolName)}</h1>
     <h2>
       ${type === "monthly" ? "Monthly" : "Annual"}
       Teacher Relief &amp; Absence Summary
@@ -260,7 +273,7 @@ export function printTeacherReport(input: TeacherReportInput) {
       <span>Teachers</span>
     </div>
     <div class="stat">
-      <strong>${totalAbsences}</strong>
+      <strong>${totalAbsentDays}</strong>
       <span>Recorded Absence Days</span>
     </div>
     <div class="stat">
@@ -278,6 +291,7 @@ export function printTeacherReport(input: TeacherReportInput) {
         <th>Teacher Name</th>
         <th>Subjects</th>
         <th>Absent Days</th>
+        <th>Absent Periods</th>
         <th>Reliefs (${escapeHtml(periodLabel)})</th>
         <th>Lifetime Reliefs</th>
       </tr>
@@ -286,13 +300,10 @@ export function printTeacherReport(input: TeacherReportInput) {
       ${tableRows}
       <tr>
         <th colspan="3">TOTAL</th>
-        <th class="number">${totalAbsences}</th>
-        <th class="number">${rows.reduce(
-          (sum, row) => sum + row.reliefCount, 0
-        )}</th>
-        <th class="number">${rows.reduce(
-          (sum, row) => sum + row.lifetime, 0
-        )}</th>
+        <th class="number">${totalAbsentDays}</th>
+        <th class="number">${totalAbsentPeriods}</th>
+        <th class="number">${totalTableReliefs}</th>
+        <th class="number">${totalLifetime}</th>
       </tr>
     </tbody>
   </table>
@@ -320,15 +331,21 @@ export function printTeacherReport(input: TeacherReportInput) {
   const printWindow = window.open("", "_blank")
 
   if (!printWindow) {
-    window.alert(
-      "Please allow pop-ups to print the report."
-    )
-    return
+    throw new Error("Please allow pop-ups to print the report.")
   }
 
   printWindow.document.open()
   printWindow.document.write(html)
   printWindow.document.close()
-  printWindow.focus()
-  printWindow.print()
+
+  let printed = false
+  const triggerPrint = () => {
+    if (printed) return
+    printed = true
+    printWindow.focus()
+    printWindow.print()
+  }
+
+  printWindow.addEventListener("load", triggerPrint, { once: true })
+  window.setTimeout(triggerPrint, 250)
 }

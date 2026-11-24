@@ -1,40 +1,49 @@
 import { jsPDF } from "jspdf"
 import type { ReliefAssignment, Teacher } from "../types"
+import { isValidIsoDate } from "./reliefEngine"
 
-const SCHOOL_NAME = "J/ Manipay Memorial English School"
+const DEFAULT_SCHOOL_NAME = "School Administration"
 
 export function downloadDailyReliefPdf(
   date: string,
   assignments: ReliefAssignment[],
-  teachers: Teacher[]
+  teachers: Teacher[],
+  schoolName = DEFAULT_SCHOOL_NAME
 ): void {
-  if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) throw new Error("Select a valid date.")
+  if (!isValidIsoDate(date)) throw new Error("Select a valid date.")
   const pdf = new jsPDF({ orientation: "landscape", unit: "mm", format: "a4" })
   const width = pdf.internal.pageSize.getWidth()
   const margin = 13
   const colX = [13, 31, 66, 109, 172]
   const colW = [18, 35, 43, 63, 112]
-  const names = new Map(teachers.map(t => [t.id, t.name]))
-  const sorted = [...assignments].sort((a, b) => a.period - b.period || a.className.localeCompare(b.className))
+  const names = new Map(teachers.map((t) => [t.id, t.name]))
+  const sorted = [...assignments].sort(
+    (a, b) => a.period - b.period || a.className.localeCompare(b.className)
+  )
   let page = 0
   let y = 0
 
   function header() {
     page += 1
+    pdf.setTextColor(17, 24, 39)
     pdf.setFont("helvetica", "bold")
     pdf.setFontSize(16)
-    pdf.text(SCHOOL_NAME, margin, 16)
+    pdf.text(schoolName.trim() || DEFAULT_SCHOOL_NAME, margin, 16)
     pdf.setFontSize(12)
     pdf.text("Daily Relief Assignment Report", margin, 24)
     pdf.setFont("helvetica", "normal")
     pdf.setFontSize(10)
     pdf.text(`Date: ${date}`, margin, 31)
-    pdf.text(`Total assignments: ${sorted.length}`, width - margin, 31, { align: "right" })
+    pdf.text(`Total assignments: ${sorted.length}`, width - margin, 31, {
+      align: "right",
+    })
     pdf.setFillColor(230, 238, 245)
     pdf.rect(margin, 36, width - 2 * margin, 9, "F")
     pdf.setFont("helvetica", "bold")
     pdf.setFontSize(9)
-    ;["Period", "Class", "Subject", "Absent Teacher", "Relief Teacher"].forEach((label, i) => pdf.text(label, colX[i] + 2, 42))
+    ;["Period", "Class", "Subject", "Absent Teacher", "Relief Teacher"].forEach(
+      (label, i) => pdf.text(label, colX[i] + 2, 42)
+    )
     y = 48
   }
 
@@ -47,14 +56,27 @@ export function downloadDailyReliefPdf(
   pdf.setFont("helvetica", "normal")
   if (sorted.length === 0) {
     pdf.setFontSize(11)
-    pdf.text("No relief assignments recorded for this date.", margin + 2, y + 8)
+    pdf.text(
+      "No relief assignments recorded for this date.",
+      margin + 2,
+      y + 8
+    )
   }
   sorted.forEach((a, index) => {
     pdf.setFont("helvetica", "normal")
     pdf.setFontSize(9)
-    const cells = [String(a.period), a.className, a.subject, names.get(a.absentTeacherId) ?? "Unknown teacher", names.get(a.reliefTeacherId) ?? "Unknown teacher"]
+    const cells = [
+      String(a.period),
+      a.className,
+      a.subject,
+      names.get(a.absentTeacherId) ?? "Unknown teacher",
+      names.get(a.reliefTeacherId) ?? "Unknown teacher",
+    ]
     const lines = cells.map((value, i) => fit(value, colW[i]))
-    const rowHeight = Math.max(9, Math.max(...lines.map(v => v.length)) * 4.5 + 4)
+    const rowHeight = Math.max(
+      9,
+      Math.max(...lines.map((v) => v.length)) * 4.5 + 4
+    )
     if (y + rowHeight > 187) {
       pdf.addPage()
       header()
