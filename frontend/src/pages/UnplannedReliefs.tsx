@@ -1,24 +1,27 @@
-
 import { useEffect, useState } from "react"
-
 import {
   fetchTeachers,
   fetchTimetables,
   fetchAbsences,
   fetchReliefAssignments,
   fetchSchoolReliefCounts,
+  fetchTeacherUnavailabilities,
   createAbsence,
   createReliefAssignment,
-  replaceReliefAssignment
+  replaceReliefAssignment,
 } from "../services/api"
-
-import { getReliefSuggestions } from "../utils/reliefEngine"
-
+import {
+  getDayName,
+  isValidIsoDate,
+  getReliefSuggestions,
+  isTeacherUnavailableDuringPeriod,
+} from "../utils/reliefEngine"
 import type {
   Teacher,
   TimetableEntry,
   Absence,
-  ReliefAssignment
+  ReliefAssignment,
+  TeacherUnavailability,
 } from "../types"
 
 const PERIODS = [1, 2, 3, 4, 5, 6, 7, 8]
@@ -34,23 +37,20 @@ function getLocalDate(): string {
   return `${year}-${month}-${day}`
 }
 
-function getWeekday(dateString: string): string {
-  const [year, month, day] = dateString.split("-").map(Number)
-
-  const date = new Date(year, month - 1, day)
-
-  return date.toLocaleDateString("en-US", {
-    weekday: "long"
-  })
-}
-
 export default function UnplannedReliefs() {
   const [teachers, setTeachers] = useState<Teacher[]>([])
   const [timetables, setTimetables] = useState<TimetableEntry[]>([])
   const [absences, setAbsences] = useState<Absence[]>([])
   const [assignments, setAssignments] = useState<ReliefAssignment[]>([])
-  const [lifetimeCounts, setLifetimeCounts] = useState<Record<string, number>>({})
-  const [chosenTeachers, setChosenTeachers] = useState<Record<string, string>>({})
+  const [unavailabilities, setUnavailabilities] = useState<
+    TeacherUnavailability[]
+  >([])
+  const [lifetimeCounts, setLifetimeCounts] = useState<Record<string, number>>(
+    {}
+  )
+  const [chosenTeachers, setChosenTeachers] = useState<Record<string, string>>(
+    {}
+  )
 
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState("")
@@ -59,10 +59,9 @@ export default function UnplannedReliefs() {
 
   const [selectedTeacherId, setSelectedTeacherId] = useState("")
   const [selectedDate, setSelectedDate] = useState(getLocalDate)
-
-  const [selectedPeriods, setSelectedPeriods] =
-    useState<number[]>([...PERIODS])
-
+  const [selectedPeriods, setSelectedPeriods] = useState<number[]>([
+    ...PERIODS,
+  ])
   const [reason, setReason] = useState("")
 
   useEffect(() => {
@@ -70,21 +69,20 @@ export default function UnplannedReliefs() {
 
     async function loadData() {
       try {
-        setLoading(true)
-        setError("")
-
         const [
           teacherData,
           timetableData,
           absenceData,
           assignmentData,
-          countsData
+          countsData,
+          unavailabilityData,
         ] = await Promise.all([
           fetchTeachers(),
           fetchTimetables(),
           fetchAbsences(),
           fetchReliefAssignments(),
-          fetchSchoolReliefCounts()
+          fetchSchoolReliefCounts(),
+          fetchTeacherUnavailabilities(),
         ])
 
         if (!active) return
@@ -94,13 +92,13 @@ export default function UnplannedReliefs() {
         setAbsences(absenceData)
         setAssignments(assignmentData)
         setLifetimeCounts(countsData)
+        setUnavailabilities(unavailabilityData)
+        setError("")
       } catch (err) {
         if (!active) return
 
         setError(
-          err instanceof Error
-            ? err.message
-            : "Failed to load school data."
+          err instanceof Error ? err.message : "Failed to load school data."
         )
       } finally {
         if (active) {
@@ -150,54 +148,102 @@ export default function UnplannedReliefs() {
   const selectedTeacher = teachers.find(
     (teacher) => teacher.id === selectedTeacherId
   )
-  const selectedDay = selectedDate
-  ? getWeekday(selectedDate)
-  : ""
+  const validDate = isValidIsoDate(selectedDate)
+  const selectedDay = validDate ? getDayName(selectedDate) : ""
 
-const affectedLessons = timetables.filter((entry) => {
-  return (
-    entry.teacherId === selectedTeacherId &&
-    entry.day.toLowerCase() === selectedDay.toLowerCase() &&
-    selectedPeriods.includes(entry.period)
-  )
-})
+  const overlappingUnavailPeriods =
+    selectedTeacherId && validDate
+      ? selectedPeriods.filter((period) =>
+          isTeacherUnavailableDuringPeriod(
+            selectedTeacherId,
+            selectedDate,
+            period,
+            unavailabilities
+          )
+        )
+      : []
 
-const affectedReliefDuties = assignments.filter((assignment) => {
-  return (
-    assignment.reliefTeacherId === selectedTeacherId &&
-    assignment.date === selectedDate &&
-    selectedPeriods.includes(assignment.period)
-  )
-})
+  const affectedLessons =
+    selectedTeacherId && selectedDay
+      ? timetables
+          .filter(
+            (entry) =>
+              entry.teacherId === selectedTeacherId &&
+              entry.day.toLowerCase() === selectedDay.toLowerCase() &&
+              selectedPeriods.includes(entry.period)
+          )
+          .sort(
+            (a, b) =>
+              a.period - b.period || a.className.localeCompare(b.className)
+          )
+      : []
 
-const existingAssignments = assignments.filter((assignment) => {
-  return (
-    assignment.absentTeacherId === selectedTeacherId &&
-    assignment.date === selectedDate &&
-    selectedPeriods.includes(assignment.period)
-  )
-})
+  const affectedReliefDuties =
+    selectedTeacherId && validDate
+      ? assignments
+          .filter(
+            (assignment) =>
+              assignment.reliefTeacherId === selectedTeacherId &&
+              assignment.date === selectedDate &&
+              selectedPeriods.includes(assignment.period)
+          )
+          .sort(
+            (a, b) =>
+              a.period - b.period || a.className.localeCompare(b.className)
+          )
+      : []
 
-const lessonsNeedingRelief = affectedLessons.filter((lesson) => {
-  return !existingAssignments.some((assignment) => {
-    return (
-      assignment.period === lesson.period &&
-      assignment.className === lesson.className &&
-      assignment.absentTeacherId === selectedTeacherId
+  const existingAssignments =
+    selectedTeacherId && validDate
+      ? assignments
+          .filter(
+            (assignment) =>
+              assignment.absentTeacherId === selectedTeacherId &&
+              assignment.date === selectedDate &&
+              selectedPeriods.includes(assignment.period)
+          )
+          .sort(
+            (a, b) =>
+              a.period - b.period || a.className.localeCompare(b.className)
+          )
+      : []
+
+  const lessonsNeedingRelief = affectedLessons.filter((lesson) => {
+    return !existingAssignments.some(
+      (assignment) =>
+        assignment.period === lesson.period &&
+        assignment.className === lesson.className &&
+        assignment.absentTeacherId === selectedTeacherId
     )
   })
-})
+
+  function isSplitPeriodSlot(className: string, period: number): boolean {
+    if (!selectedDay) return false
+    return (
+      timetables.filter(
+        (entry) =>
+          entry.day.toLowerCase() === selectedDay.toLowerCase() &&
+          entry.period === period &&
+          entry.className.trim().toLowerCase() ===
+            className.trim().toLowerCase()
+      ).length > 1
+    )
+  }
 
   // Preview the selected teacher as absent before the record is saved.
-  const previewAbsences: Absence[] = selectedTeacherId && selectedDate
-    ? [...absences, {
-        id: "preview-unplanned-absence",
-        teacherId: selectedTeacherId,
-        date: selectedDate,
-        reason,
-        absentPeriods: selectedPeriods
-      }]
-    : absences
+  const previewAbsences: Absence[] =
+    selectedTeacherId && validDate
+      ? [
+          ...absences,
+          {
+            id: "preview-unplanned-absence",
+            teacherId: selectedTeacherId,
+            date: selectedDate,
+            reason,
+            absentPeriods: selectedPeriods,
+          },
+        ]
+      : absences
 
   function suggestionOptions(
     key: string,
@@ -206,28 +252,42 @@ const lessonsNeedingRelief = affectedLessons.filter((lesson) => {
     absentTeacherId: string,
     excludeAssignmentId?: string
   ) {
+    if (!validDate) return []
     // Exclude the assignment being replaced, so candidates are not
     // incorrectly considered busy because of the old relief teacher.
     const otherAssignments = excludeAssignmentId
-      ? assignments.filter((assignment) => assignment.id !== excludeAssignmentId)
+      ? assignments.filter(
+          (assignment) => assignment.id !== excludeAssignmentId
+        )
       : assignments
 
     // Other selections on this screen also reserve their chosen periods.
-    const plannedAssignments: ReliefAssignment[] = Object.entries(chosenTeachers)
-      .filter(([selectionKey, teacherId]) => selectionKey !== key && Boolean(teacherId))
+    const plannedAssignments: ReliefAssignment[] = Object.entries(
+      chosenTeachers
+    )
+      .filter(
+        ([selectionKey, teacherId]) =>
+          selectionKey !== key && Boolean(teacherId)
+      )
       .flatMap(([selectionKey, teacherId]) => {
-        const lesson = lessonsNeedingRelief.find((item) => `lesson:${item.id}` === selectionKey)
-        const duty = affectedReliefDuties.find((item) => `replacement:${item.id}` === selectionKey)
+        const lesson = lessonsNeedingRelief.find(
+          (item) => `lesson:${item.id}` === selectionKey
+        )
+        const duty = affectedReliefDuties.find(
+          (item) => `replacement:${item.id}` === selectionKey
+        )
         if (!lesson && !duty) return []
-        return [{
-          id: `preview:${selectionKey}`,
-          date: selectedDate,
-          period: lesson?.period ?? duty!.period,
-          className: lesson?.className ?? duty!.className,
-          subject: lesson?.subject ?? duty!.subject,
-          absentTeacherId: lesson?.teacherId ?? duty!.absentTeacherId,
-          reliefTeacherId: teacherId
-        }]
+        return [
+          {
+            id: `preview:${selectionKey}`,
+            date: selectedDate,
+            period: lesson?.period ?? duty!.period,
+            className: lesson?.className ?? duty!.className,
+            subject: lesson?.subject ?? duty!.subject,
+            absentTeacherId: lesson?.teacherId ?? duty!.absentTeacherId,
+            reliefTeacherId: teacherId,
+          },
+        ]
       })
 
     return getReliefSuggestions(
@@ -236,25 +296,41 @@ const lessonsNeedingRelief = affectedLessons.filter((lesson) => {
       timetables,
       previewAbsences,
       [...otherAssignments, ...plannedAssignments],
-      lifetimeCounts
+      lifetimeCounts,
+      unavailabilities
     ).filter((option) => option.teacher.id !== selectedTeacherId)
   }
 
   async function refreshSchoolData() {
-    const [teacherData, timetableData, absenceData, assignmentData, countsData] =
-      await Promise.all([
-        fetchTeachers(),
-        fetchTimetables(),
-        fetchAbsences(),
-        fetchReliefAssignments(),
-        fetchSchoolReliefCounts()
-      ])
+    const [
+      teacherData,
+      timetableData,
+      absenceData,
+      assignmentData,
+      countsData,
+      unavailabilityData,
+    ] = await Promise.all([
+      fetchTeachers(),
+      fetchTimetables(),
+      fetchAbsences(),
+      fetchReliefAssignments(),
+      fetchSchoolReliefCounts(),
+      fetchTeacherUnavailabilities(),
+    ])
     setTeachers(teacherData)
     setTimetables(timetableData)
     setAbsences(absenceData)
     setAssignments(assignmentData)
     setLifetimeCounts(countsData)
-    return { teacherData, timetableData, absenceData, assignmentData, countsData }
+    setUnavailabilities(unavailabilityData)
+    return {
+      teacherData,
+      timetableData,
+      absenceData,
+      assignmentData,
+      countsData,
+      unavailabilityData,
+    }
   }
 
   async function confirmAndSave() {
@@ -262,8 +338,10 @@ const lessonsNeedingRelief = affectedLessons.filter((lesson) => {
     setSaveMessage("")
     setError("")
 
-    if (!selectedTeacherId || !selectedDate || selectedPeriods.length === 0) {
-      setSaveMessage("Select a teacher, date, and at least one absent period.")
+    if (!selectedTeacherId || !validDate || selectedPeriods.length === 0) {
+      setSaveMessage(
+        "Select a teacher, valid date, and at least one absent period."
+      )
       return
     }
 
@@ -276,21 +354,27 @@ const lessonsNeedingRelief = affectedLessons.filter((lesson) => {
         className: lesson.className,
         subject: lesson.subject,
         absentTeacherId: lesson.teacherId,
-        reliefTeacherId: chosenTeachers[`lesson:${lesson.id}`]
+        reliefTeacherId: chosenTeachers[`lesson:${lesson.id}`],
       }))
 
     const plannedReplacements = affectedReliefDuties
-      .filter((assignment) => Boolean(chosenTeachers[`replacement:${assignment.id}`]))
+      .filter((assignment) =>
+        Boolean(chosenTeachers[`replacement:${assignment.id}`])
+      )
       .map((assignment) => ({
         key: `replacement:${assignment.id}`,
         assignment,
-        newTeacherId: chosenTeachers[`replacement:${assignment.id}`]
+        newTeacherId: chosenTeachers[`replacement:${assignment.id}`],
       }))
 
-    const unassignedCount = lessonsNeedingRelief.length +
-      affectedReliefDuties.length - plannedLessons.length - plannedReplacements.length
+    const unassignedCount =
+      lessonsNeedingRelief.length +
+      affectedReliefDuties.length -
+      plannedLessons.length -
+      plannedReplacements.length
 
-    const message = `Record the absence for ${selectedTeacher?.name ?? "this teacher"} on ${selectedDate} ` +
+    const message =
+      `Record the absence for ${selectedTeacher?.name ?? "this teacher"} on ${selectedDate} ` +
       `(periods ${selectedPeriods.join(", ")})?\n\n` +
       `New relief assignments: ${plannedLessons.length}\n` +
       `Relief replacements: ${plannedReplacements.length}\n` +
@@ -306,68 +390,119 @@ const lessonsNeedingRelief = affectedLessons.filter((lesson) => {
     try {
       // Refresh first so stale dropdown selections cannot silently overwrite changes.
       const fresh = await refreshSchoolData()
-      const currentTeacher = fresh.teacherData.find((t) => t.id === selectedTeacherId)
-      if (!currentTeacher?.active) throw new Error("The absent teacher is no longer active.")
+      const currentTeacher = fresh.teacherData.find(
+        (t) => t.id === selectedTeacherId
+      )
+      if (!currentTeacher?.active) {
+        throw new Error("The absent teacher is no longer active.")
+      }
 
-      const day = getWeekday(selectedDate)
-      const liveLessons = fresh.timetableData.filter((entry) =>
-        entry.teacherId === selectedTeacherId &&
-        entry.day.toLowerCase() === day.toLowerCase() &&
-        selectedPeriods.includes(entry.period)
+      const day = getDayName(selectedDate)
+      const liveLessons = fresh.timetableData.filter(
+        (entry) =>
+          entry.teacherId === selectedTeacherId &&
+          entry.day.toLowerCase() === day.toLowerCase() &&
+          selectedPeriods.includes(entry.period)
       )
-      const liveDuties = fresh.assignmentData.filter((assignment) =>
-        assignment.reliefTeacherId === selectedTeacherId &&
-        assignment.date === selectedDate &&
-        selectedPeriods.includes(assignment.period)
+      const liveDuties = fresh.assignmentData.filter(
+        (assignment) =>
+          assignment.reliefTeacherId === selectedTeacherId &&
+          assignment.date === selectedDate &&
+          selectedPeriods.includes(assignment.period)
       )
-      const preview: Absence[] = [...fresh.absenceData, {
-        id: "preview-current-absence", teacherId: selectedTeacherId,
-        date: selectedDate, reason, absentPeriods: selectedPeriods
-      }]
+      const preview: Absence[] = [
+        ...fresh.absenceData,
+        {
+          id: "preview-current-absence",
+          teacherId: selectedTeacherId,
+          date: selectedDate,
+          reason,
+          absentPeriods: selectedPeriods,
+        },
+      ]
       const reserved: ReliefAssignment[] = []
 
       for (const item of plannedLessons) {
-        const stillScheduled = liveLessons.some((lesson) =>
-          lesson.period === item.period && lesson.className === item.className &&
-          lesson.subject === item.subject
+        const stillScheduled = liveLessons.some(
+          (lesson) =>
+            lesson.period === item.period &&
+            lesson.className === item.className &&
+            lesson.subject === item.subject
         )
-        const alreadyAssigned = fresh.assignmentData.some((a) =>
-          a.date === selectedDate && a.period === item.period &&
-          a.className === item.className
+        const alreadyAssigned = fresh.assignmentData.some(
+          (a) =>
+            a.date === selectedDate &&
+            a.period === item.period &&
+            a.className === item.className &&
+            a.absentTeacherId === item.absentTeacherId
         )
         if (!stillScheduled || alreadyAssigned) {
-          throw new Error(`The timetable or assignment for ${item.className}, period ${item.period} changed. Review selections.`)
+          throw new Error(
+            `The timetable or assignment for ${item.className}, period ${item.period} changed. Review selections.`
+          )
         }
       }
       for (const item of plannedReplacements) {
         const current = liveDuties.find((a) => a.id === item.assignment.id)
         if (!current || current.reliefTeacherId !== selectedTeacherId) {
-          throw new Error(`Relief duty for ${item.assignment.className}, period ${item.assignment.period} changed. Review selections.`)
+          throw new Error(
+            `Relief duty for ${item.assignment.className}, period ${item.assignment.period} changed. Review selections.`
+          )
         }
       }
 
       // Validate all choices together, including choices for the same period.
       for (const item of plannedLessons) {
         const eligible = getReliefSuggestions(
-          { date: selectedDate, period: item.period, subject: item.subject,
-            absentTeacherId: item.absentTeacherId },
-          fresh.teacherData, fresh.timetableData, preview,
-          [...fresh.assignmentData, ...reserved], fresh.countsData
+          {
+            date: selectedDate,
+            period: item.period,
+            subject: item.subject,
+            absentTeacherId: item.absentTeacherId,
+          },
+          fresh.teacherData,
+          fresh.timetableData,
+          preview,
+          [...fresh.assignmentData, ...reserved],
+          fresh.countsData,
+          fresh.unavailabilityData
         ).some((candidate) => candidate.teacher.id === item.reliefTeacherId)
-        if (!eligible) throw new Error(`Selected substitute is unavailable for ${item.className}, period ${item.period}.`)
+        if (!eligible) {
+          throw new Error(
+            `Selected substitute is unavailable for ${item.className}, period ${item.period}.`
+          )
+        }
         reserved.push({ id: `planned:${item.key}`, ...item })
       }
       for (const item of plannedReplacements) {
         const a = item.assignment
         const eligible = getReliefSuggestions(
-          { date: selectedDate, period: a.period, subject: a.subject,
-            absentTeacherId: a.absentTeacherId },
-          fresh.teacherData, fresh.timetableData, preview,
-          [...fresh.assignmentData.filter((other) => other.id !== a.id), ...reserved],
-          fresh.countsData
+          {
+            date: selectedDate,
+            period: a.period,
+            subject: a.subject,
+            absentTeacherId: a.absentTeacherId,
+          },
+          fresh.teacherData,
+          fresh.timetableData,
+          preview,
+          [
+            ...fresh.assignmentData.filter((other) => other.id !== a.id),
+            ...reserved,
+          ],
+          fresh.countsData,
+          fresh.unavailabilityData
         ).some((candidate) => candidate.teacher.id === item.newTeacherId)
-        if (!eligible) throw new Error(`Selected replacement is unavailable for ${a.className}, period ${a.period}.`)
-        reserved.push({ ...a, id: `planned:${item.key}`, reliefTeacherId: item.newTeacherId })
+        if (!eligible) {
+          throw new Error(
+            `Selected replacement is unavailable for ${a.className}, period ${a.period}.`
+          )
+        }
+        reserved.push({
+          ...a,
+          id: `planned:${item.key}`,
+          reliefTeacherId: item.newTeacherId,
+        })
       }
 
       // The existing RPC merges periods when the teacher already has an absence.
@@ -375,16 +510,19 @@ const lessonsNeedingRelief = affectedLessons.filter((lesson) => {
         teacherId: selectedTeacherId,
         date: selectedDate,
         reason: reason.trim(),
-        absentPeriods: [...selectedPeriods].sort((a, b) => a - b)
+        absentPeriods: [...selectedPeriods].sort((a, b) => a - b),
       })
       absenceSaved = true
 
       // Each write is independently checked by its Supabase RPC.
       for (const item of plannedLessons) {
         await createReliefAssignment({
-          date: item.date, period: item.period, className: item.className,
-          subject: item.subject, absentTeacherId: item.absentTeacherId,
-          reliefTeacherId: item.reliefTeacherId
+          date: item.date,
+          period: item.period,
+          className: item.className,
+          subject: item.subject,
+          absentTeacherId: item.absentTeacherId,
+          reliefTeacherId: item.reliefTeacherId,
         })
         successfulAssignments += 1
       }
@@ -394,21 +532,27 @@ const lessonsNeedingRelief = affectedLessons.filter((lesson) => {
       }
 
       setChosenTeachers({})
-      setSaveMessage(`Saved absence successfully. Created ${successfulAssignments} relief assignment(s) ` +
-        `and confirmed ${successfulReplacements} replacement(s). ` +
-        (unassignedCount > 0 ? `${unassignedCount} duty/duties still need substitutes.` : "All identified duties have been addressed."))
+      setSaveMessage(
+        `Saved absence successfully. Created ${successfulAssignments} relief assignment(s) ` +
+          `and confirmed ${successfulReplacements} replacement(s). ` +
+          (unassignedCount > 0
+            ? `${unassignedCount} duty/duties still need substitutes.`
+            : "All identified duties have been addressed.")
+      )
     } catch (err) {
       const detail = err instanceof Error ? err.message : "Unknown error"
       setSaveMessage(
         `${absenceSaved ? "PARTIAL SAVE: The absence was saved." : "Nothing was saved by this attempt."} ` +
-        `Created ${successfulAssignments} assignment(s) and completed ${successfulReplacements} replacement(s). ` +
-        `${detail} Review the refreshed records before trying again.`
+          `Created ${successfulAssignments} assignment(s) and completed ${successfulReplacements} replacement(s). ` +
+          `${detail} Review the refreshed records before trying again.`
       )
     } finally {
       try {
         await refreshSchoolData()
       } catch (refreshError) {
-        setError(`Could not refresh school data: ${refreshError instanceof Error ? refreshError.message : "Unknown error"}. Reload the page before making further changes.`)
+        setError(
+          `Could not refresh school data: ${refreshError instanceof Error ? refreshError.message : "Unknown error"}. Reload the page before making further changes.`
+        )
       }
       setSaving(false)
     }
@@ -421,7 +565,13 @@ const lessonsNeedingRelief = affectedLessons.filter((lesson) => {
     absentTeacherId: string,
     excludeAssignmentId?: string
   ) {
-    const options = suggestionOptions(key, period, subject, absentTeacherId, excludeAssignmentId)
+    const options = suggestionOptions(
+      key,
+      period,
+      subject,
+      absentTeacherId,
+      excludeAssignmentId
+    )
     const selected = chosenTeachers[key] ?? ""
     return (
       <div className="mt-3">
@@ -431,9 +581,16 @@ const lessonsNeedingRelief = affectedLessons.filter((lesson) => {
         <select
           id={key}
           disabled={saving}
-          value={options.some((option) => option.teacher.id === selected) ? selected : ""}
+          value={
+            options.some((option) => option.teacher.id === selected)
+              ? selected
+              : ""
+          }
           onChange={(event) => {
-            setChosenTeachers((current) => ({ ...current, [key]: event.target.value }))
+            setChosenTeachers((current) => ({
+              ...current,
+              [key]: event.target.value,
+            }))
             setSaveMessage("")
           }}
           className="mt-2 w-full rounded-lg border border-slate-600 bg-slate-950 p-3 text-white"
@@ -441,13 +598,16 @@ const lessonsNeedingRelief = affectedLessons.filter((lesson) => {
           <option value="">Select a substitute</option>
           {options.map((option) => (
             <option key={option.teacher.id} value={option.teacher.id}>
-              {option.teacher.name} — {option.subjectMatch ? "Subject match" : "Other subject"}
+              {option.teacher.name} —{" "}
+              {option.subjectMatch ? "Subject match" : "Other subject"}
               {` · Today: ${option.reliefCount} · Total: ${option.totalReliefCount}`}
             </option>
           ))}
         </select>
         {options.length === 0 && (
-          <p className="mt-2 text-xs text-amber-300">No eligible substitute found for this period.</p>
+          <p className="mt-2 text-xs text-amber-300">
+            No eligible substitute found for this period.
+          </p>
         )}
       </div>
     )
@@ -462,17 +622,15 @@ const lessonsNeedingRelief = affectedLessons.filter((lesson) => {
         </h1>
 
         <p className="mt-2 text-slate-400">
-          Record unexpected teacher absences and arrange
-          suitable relief assignments from one place.
+          Record unexpected teacher absences and arrange suitable relief
+          assignments from one place.
         </p>
       </div>
 
       {/* Loading state */}
       {loading && (
         <div className="rounded-xl border border-slate-700 bg-slate-800 p-6">
-          <p className="text-slate-400">
-            Loading school data...
-          </p>
+          <p className="text-slate-400">Loading school data...</p>
         </div>
       )}
 
@@ -488,7 +646,6 @@ const lessonsNeedingRelief = affectedLessons.filter((lesson) => {
 
       {!loading && !error && (
         <>
-          
           {/* Unplanned absence form */}
           <div className="rounded-xl border border-slate-700 bg-slate-800 p-6">
             <div>
@@ -497,8 +654,7 @@ const lessonsNeedingRelief = affectedLessons.filter((lesson) => {
               </h2>
 
               <p className="mt-2 text-sm text-slate-400">
-                Select the unavailable teacher, date, and
-                affected periods.
+                Select the unavailable teacher, date, and affected periods.
               </p>
             </div>
 
@@ -515,20 +671,13 @@ const lessonsNeedingRelief = affectedLessons.filter((lesson) => {
                   }}
                   className="mt-2 w-full rounded-lg border border-slate-600 bg-slate-900 p-3 text-white"
                 >
-                  <option value="">
-                    Select a teacher
-                  </option>
+                  <option value="">Select a teacher</option>
 
                   {teachers
                     .filter((teacher) => teacher.active)
-                    .sort((a, b) =>
-                      a.name.localeCompare(b.name)
-                    )
+                    .sort((a, b) => a.name.localeCompare(b.name))
                     .map((teacher) => (
-                      <option
-                        key={teacher.id}
-                        value={teacher.id}
-                      >
+                      <option key={teacher.id} value={teacher.id}>
                         {teacher.name}
                       </option>
                     ))}
@@ -560,9 +709,7 @@ const lessonsNeedingRelief = affectedLessons.filter((lesson) => {
                 <button
                   type="button"
                   disabled={saving}
-                  onClick={() =>
-                    selectPeriodPreset("full")
-                  }
+                  onClick={() => selectPeriodPreset("full")}
                   className="rounded-lg border border-cyan-700 px-4 py-2 text-sm text-cyan-300 hover:bg-cyan-900/40"
                 >
                   Full Day
@@ -571,9 +718,7 @@ const lessonsNeedingRelief = affectedLessons.filter((lesson) => {
                 <button
                   type="button"
                   disabled={saving}
-                  onClick={() =>
-                    selectPeriodPreset("first")
-                  }
+                  onClick={() => selectPeriodPreset("first")}
                   className="rounded-lg border border-cyan-700 px-4 py-2 text-sm text-cyan-300 hover:bg-cyan-900/40"
                 >
                   First Half
@@ -582,9 +727,7 @@ const lessonsNeedingRelief = affectedLessons.filter((lesson) => {
                 <button
                   type="button"
                   disabled={saving}
-                  onClick={() =>
-                    selectPeriodPreset("second")
-                  }
+                  onClick={() => selectPeriodPreset("second")}
                   className="rounded-lg border border-cyan-700 px-4 py-2 text-sm text-cyan-300 hover:bg-cyan-900/40"
                 >
                   Second Half
@@ -618,22 +761,23 @@ const lessonsNeedingRelief = affectedLessons.filter((lesson) => {
             {/* Reason */}
             <label className="mt-6 block text-sm text-slate-300">
               Reason (Optional)
-              <textarea
+              <input
+                type="text"
                 disabled={saving}
                 value={reason}
-                onChange={(event) =>
+                onChange={(event) => {
                   setReason(event.target.value)
-                }
-                rows={3}
+                  setSaveMessage("")
+                }}
                 placeholder="e.g. Unexpected leave"
                 className="mt-2 w-full rounded-lg border border-slate-600 bg-slate-900 p-3 text-white"
               />
             </label>
 
-            {/* Selection preview */}
-            <div className="mt-6 rounded-xl border border-slate-700 bg-slate-900 p-5">
-              <h3 className="font-semibold text-white">
-                Absence Preview
+            {/* Selection summary */}
+            <div className="mt-6 rounded-xl border border-slate-700 bg-slate-900 p-4">
+              <h3 className="text-sm font-semibold text-cyan-300">
+                Selected Summary
               </h3>
 
               <div className="mt-3 space-y-2 text-sm">
@@ -669,6 +813,16 @@ const lessonsNeedingRelief = affectedLessons.filter((lesson) => {
               </div>
             </div>
 
+            {overlappingUnavailPeriods.length > 0 && (
+              <p className="mt-4 rounded-lg border border-amber-600/50 bg-amber-950/40 p-3 text-xs text-amber-300">
+                Note: {selectedTeacher?.name} already has period-level
+                unavailability marked for period(s){" "}
+                {overlappingUnavailPeriods.join(", ")} on this date. Recording
+                this absence ensures their scheduled lessons receive relief
+                cover.
+              </p>
+            )}
+
             <p className="mt-4 text-xs text-slate-400">
               Review affected lessons and select suitable substitutes below.
               Saving requires administrator confirmation.
@@ -676,42 +830,84 @@ const lessonsNeedingRelief = affectedLessons.filter((lesson) => {
           </div>
 
           {/* Affected-work preview */}
-          {selectedTeacherId && selectedDate && selectedPeriods.length > 0 && (
+          {selectedTeacherId && validDate && selectedPeriods.length > 0 && (
             <div className="space-y-5">
               <div>
                 <h2 className="text-xl font-semibold text-white">
                   Affected Lessons & Relief Duties
                 </h2>
                 <p className="mt-2 text-sm text-slate-400">
-                  Preview for {selectedTeacher?.name} on {selectedDate} ({selectedDay}).
+                  Preview for {selectedTeacher?.name} on {selectedDate} (
+                  {selectedDay}).
                 </p>
               </div>
 
               <div className="grid gap-4 sm:grid-cols-3">
                 {[
-                  { label: "Lessons Needing Relief", count: lessonsNeedingRelief.length, color: "text-amber-400" },
-                  { label: "Existing Relief Duties Affected", count: affectedReliefDuties.length, color: "text-red-400" },
-                  { label: "Already Assigned Lessons", count: existingAssignments.length, color: "text-cyan-400" }
+                  {
+                    label: "Lessons Needing Relief",
+                    count: lessonsNeedingRelief.length,
+                    color: "text-amber-400",
+                  },
+                  {
+                    label: "Existing Relief Duties Affected",
+                    count: affectedReliefDuties.length,
+                    color: "text-red-400",
+                  },
+                  {
+                    label: "Already Assigned Lessons",
+                    count: existingAssignments.length,
+                    color: "text-cyan-400",
+                  },
                 ].map((item) => (
-                  <div key={item.label} className="rounded-xl border border-slate-700 bg-slate-800 p-5">
+                  <div
+                    key={item.label}
+                    className="rounded-xl border border-slate-700 bg-slate-800 p-5"
+                  >
                     <p className="text-sm text-slate-400">{item.label}</p>
-                    <p className={`mt-2 text-3xl font-bold ${item.color}`}>{item.count}</p>
+                    <p className={`mt-2 text-3xl font-bold ${item.color}`}>
+                      {item.count}
+                    </p>
                   </div>
                 ))}
               </div>
 
               <div className="rounded-xl border border-slate-700 bg-slate-800 p-5">
-                <h3 className="text-lg font-semibold text-white">Scheduled Lessons Needing Relief</h3>
+                <h3 className="text-lg font-semibold text-white">
+                  Scheduled Lessons Needing Relief
+                </h3>
                 {lessonsNeedingRelief.length === 0 ? (
-                  <p className="mt-4 text-sm text-slate-400">No unassigned scheduled lessons found for the selected periods.</p>
+                  <p className="mt-4 text-sm text-slate-400">
+                    No unassigned scheduled lessons found for the selected
+                    periods.
+                  </p>
                 ) : (
                   <div className="mt-4 space-y-3">
                     {lessonsNeedingRelief.map((lesson) => (
-                      <div key={lesson.id} className="rounded-lg border border-slate-700 bg-slate-900 p-4">
-                        <p className="font-medium text-white">{lesson.className}</p>
-                        <p className="mt-1 text-sm text-slate-400">Period {lesson.period} • {lesson.subject}</p>
-                        <p className="mt-2 text-xs text-amber-300">Relief teacher required</p>
-                        {teacherSelector(`lesson:${lesson.id}`, lesson.period, lesson.subject, lesson.teacherId)}
+                      <div
+                        key={lesson.id}
+                        className="rounded-lg border border-slate-700 bg-slate-900 p-4"
+                      >
+                        <p className="font-medium text-white">
+                          {lesson.className}
+                          {isSplitPeriodSlot(lesson.className, lesson.period) && (
+                            <span className="ml-2 rounded bg-cyan-950 px-2 py-0.5 text-xs text-cyan-300">
+                              Split Period
+                            </span>
+                          )}
+                        </p>
+                        <p className="mt-1 text-sm text-slate-400">
+                          Period {lesson.period} • {lesson.subject}
+                        </p>
+                        <p className="mt-2 text-xs text-amber-300">
+                          Relief teacher required
+                        </p>
+                        {teacherSelector(
+                          `lesson:${lesson.id}`,
+                          lesson.period,
+                          lesson.subject,
+                          lesson.teacherId
+                        )}
                       </div>
                     ))}
                   </div>
@@ -719,17 +915,37 @@ const lessonsNeedingRelief = affectedLessons.filter((lesson) => {
               </div>
 
               <div className="rounded-xl border border-slate-700 bg-slate-800 p-5">
-                <h3 className="text-lg font-semibold text-white">Existing Relief Duties Requiring Replacement</h3>
+                <h3 className="text-lg font-semibold text-white">
+                  Existing Relief Duties Requiring Replacement
+                </h3>
                 {affectedReliefDuties.length === 0 ? (
-                  <p className="mt-4 text-sm text-slate-400">This teacher has no existing relief duties during the selected periods.</p>
+                  <p className="mt-4 text-sm text-slate-400">
+                    This teacher has no existing relief duties during the
+                    selected periods.
+                  </p>
                 ) : (
                   <div className="mt-4 space-y-3">
                     {affectedReliefDuties.map((assignment) => (
-                      <div key={assignment.id} className="rounded-lg border border-red-900 bg-slate-900 p-4">
-                        <p className="font-medium text-white">{assignment.className}</p>
-                        <p className="mt-1 text-sm text-slate-400">Period {assignment.period} • {assignment.subject}</p>
-                        <p className="mt-2 text-xs text-red-300">Replacement teacher required</p>
-                        {teacherSelector(`replacement:${assignment.id}`, assignment.period, assignment.subject, assignment.absentTeacherId, assignment.id)}
+                      <div
+                        key={assignment.id}
+                        className="rounded-lg border border-red-900 bg-slate-900 p-4"
+                      >
+                        <p className="font-medium text-white">
+                          {assignment.className}
+                        </p>
+                        <p className="mt-1 text-sm text-slate-400">
+                          Period {assignment.period} • {assignment.subject}
+                        </p>
+                        <p className="mt-2 text-xs text-red-300">
+                          Replacement teacher required
+                        </p>
+                        {teacherSelector(
+                          `replacement:${assignment.id}`,
+                          assignment.period,
+                          assignment.subject,
+                          assignment.absentTeacherId,
+                          assignment.id
+                        )}
                       </div>
                     ))}
                   </div>
@@ -737,18 +953,42 @@ const lessonsNeedingRelief = affectedLessons.filter((lesson) => {
               </div>
 
               <div className="rounded-xl border border-slate-700 bg-slate-800 p-5">
-                <h3 className="text-lg font-semibold text-white">Lessons With Existing Relief Assignments</h3>
+                <h3 className="text-lg font-semibold text-white">
+                  Lessons With Existing Relief Assignments
+                </h3>
                 {existingAssignments.length === 0 ? (
-                  <p className="mt-4 text-sm text-slate-400">No existing assignments found.</p>
+                  <p className="mt-4 text-sm text-slate-400">
+                    No existing assignments found.
+                  </p>
                 ) : (
                   <div className="mt-4 space-y-3">
                     {existingAssignments.map((assignment) => {
-                      const reliefTeacher = teachers.find((teacher) => teacher.id === assignment.reliefTeacherId)
+                      const reliefTeacher = teachers.find(
+                        (teacher) => teacher.id === assignment.reliefTeacherId
+                      )
                       return (
-                        <div key={assignment.id} className="rounded-lg border border-slate-700 bg-slate-900 p-4">
-                          <p className="font-medium text-white">{assignment.className}</p>
-                          <p className="mt-1 text-sm text-slate-400">Period {assignment.period} • {assignment.subject}</p>
-                          <p className="mt-2 text-sm text-cyan-300">Assigned to: {reliefTeacher?.name ?? "Unknown teacher"}</p>
+                        <div
+                          key={assignment.id}
+                          className="rounded-lg border border-slate-700 bg-slate-900 p-4"
+                        >
+                          <p className="font-medium text-white">
+                            {assignment.className}
+                            {isSplitPeriodSlot(
+                              assignment.className,
+                              assignment.period
+                            ) && (
+                              <span className="ml-2 rounded bg-cyan-950 px-2 py-0.5 text-xs text-cyan-300">
+                                Split Period
+                              </span>
+                            )}
+                          </p>
+                          <p className="mt-1 text-sm text-slate-400">
+                            Period {assignment.period} • {assignment.subject}
+                          </p>
+                          <p className="mt-2 text-sm text-cyan-300">
+                            Assigned to:{" "}
+                            {reliefTeacher?.name ?? "Unknown teacher"}
+                          </p>
                         </div>
                       )
                     })}
@@ -759,21 +999,36 @@ const lessonsNeedingRelief = affectedLessons.filter((lesson) => {
           )}
 
           <div className="rounded-xl border border-cyan-900 bg-slate-800 p-6">
-            <h2 className="text-lg font-semibold text-white">Confirm Unplanned Absence & Relief</h2>
+            <h2 className="text-lg font-semibold text-white">
+              Confirm Unplanned Absence & Relief
+            </h2>
             <p className="mt-2 text-sm text-slate-400">
-              The absence will be recorded even when some lessons have no selected substitute.
-              Only selected substitutes will receive assignments. Other duties remain pending.
+              The absence will be recorded even when some lessons have no
+              selected substitute. Only selected substitutes will receive
+              assignments. Other duties remain pending.
             </p>
             <button
               type="button"
-              disabled={saving || !selectedTeacherId || !selectedDate || selectedPeriods.length === 0}
-              onClick={() => { void confirmAndSave() }}
+              disabled={
+                saving ||
+                !selectedTeacherId ||
+                !validDate ||
+                selectedPeriods.length === 0
+              }
+              onClick={() => {
+                void confirmAndSave()
+              }}
               className="mt-4 rounded-lg bg-cyan-500 px-5 py-3 font-semibold text-slate-950 hover:bg-cyan-400 disabled:cursor-not-allowed disabled:opacity-50"
             >
               {saving ? "Saving and verifying..." : "Confirm & Save"}
             </button>
             {saveMessage && (
-              <p role="status" className="mt-4 whitespace-pre-line text-sm text-amber-200">{saveMessage}</p>
+              <p
+                role="status"
+                className="mt-4 whitespace-pre-line text-sm text-amber-200"
+              >
+                {saveMessage}
+              </p>
             )}
           </div>
         </>

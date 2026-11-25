@@ -1,28 +1,24 @@
-import { fetchSchoolConfiguration } from "../services/api"
-import type { SchoolClass } from "../services/api"
-
 import { useEffect, useState, useRef } from "react"
 import type { FormEvent } from "react"
-import type { TimetableProgress } from "../services/api"
 import {
+  fetchSchoolConfiguration,
   createTimetable,
   fetchTimetables,
   fetchTeachers,
   deleteTimetable,
   saveFreePeriod,
   fetchTimetableProgress,
+  fetchTeacherUnavailabilities,
 } from "../services/api"
-
-import type { Teacher, TimetableEntry } from "../types"
+import type { SchoolClass, TimetableProgress } from "../services/api"
+import type {
+  Teacher,
+  TimetableEntry,
+  TeacherUnavailability,
+} from "../types"
 import { updateTimetablePeriod } from "../services/timetableEditing"
 
-const DAYS = [
-  "Monday",
-  "Tuesday",
-  "Wednesday",
-  "Thursday",
-  "Friday",
-]
+const DAYS = ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday"]
 
 const PERIODS = [1, 2, 3, 4, 5, 6, 7, 8]
 
@@ -31,7 +27,12 @@ function Timetables() {
   const [teachers, setTeachers] = useState<Teacher[]>([])
   const [databaseEntries, setDatabaseEntries] = useState<TimetableEntry[]>([])
   const [schoolClasses, setSchoolClasses] = useState<SchoolClass[]>([])
-  const [databaseStatus, setDatabaseStatus] = useState("Checking cloud database...")
+  const [unavailabilities, setUnavailabilities] = useState<
+    TeacherUnavailability[]
+  >([])
+  const [databaseStatus, setDatabaseStatus] = useState(
+    "Checking cloud database..."
+  )
 
   // Selected teacher
   const [teacherId, setTeacherId] = useState("")
@@ -39,8 +40,8 @@ function Timetables() {
   // Wizard state
   const [currentStep, setCurrentStep] = useState(0)
   const [savedProgress, setSavedProgress] = useState<TimetableProgress[]>([])
-const [isLoadingProgress, setIsLoadingProgress] = useState(false)
-const progressRequestId = useRef(0)
+  const [isLoadingProgress, setIsLoadingProgress] = useState(false)
+  const progressRequestId = useRef(0)
   const [showLessonForm, setShowLessonForm] = useState(false)
   const [isEditingLesson, setIsEditingLesson] = useState(false)
   const [wizardClass, setWizardClass] = useState("")
@@ -61,25 +62,41 @@ const progressRequestId = useRef(0)
 
   // Load school-scoped cloud data
   useEffect(() => {
+    let mounted = true
+
     async function loadDatabaseData() {
       try {
-        const [timetables, databaseTeachers, configuration] = await Promise.all([
+        const [
+          timetables,
+          databaseTeachers,
+          configuration,
+          loadedUnavailabilities,
+        ] = await Promise.all([
           fetchTimetables(),
           fetchTeachers(),
           fetchSchoolConfiguration(),
+          fetchTeacherUnavailabilities(),
         ])
+
+        if (!mounted) return
 
         setDatabaseEntries(timetables)
         setTeachers(databaseTeachers)
         setSchoolClasses(configuration.classes)
+        setUnavailabilities(loadedUnavailabilities)
         setDatabaseStatus("Connected to Supabase")
       } catch (loadError) {
         console.error("Cloud API error:", loadError)
+        if (!mounted) return
         setDatabaseStatus("Cloud connection failed")
       }
     }
 
     void loadDatabaseData()
+
+    return () => {
+      mounted = false
+    }
   }, [])
 
   // Derived values
@@ -96,7 +113,11 @@ const progressRequestId = useRef(0)
   // Using a Set prevents the same slot from being counted twice.
   const completedSlots = new Set<string>()
   for (const entry of databaseEntries) {
-    if (entry.teacherId === teacherId && DAYS.includes(entry.day) && PERIODS.includes(entry.period)) {
+    if (
+      entry.teacherId === teacherId &&
+      DAYS.includes(entry.day) &&
+      PERIODS.includes(entry.period)
+    ) {
       completedSlots.add(`${entry.day}:${entry.period}`)
     }
   }
@@ -113,36 +134,84 @@ const progressRequestId = useRef(0)
         (item) => item.day === currentDay && item.period === currentPeriod
       )
 
-  const availableClassNames = Array.from(new Set([
-    ...schoolClasses.map(item => item.name),
-    ...databaseEntries.map(item => item.className),
-  ])).sort((a, b) => a.localeCompare(b, undefined, { numeric: true }))
+  const availableClassNames = Array.from(
+    new Set([
+      ...schoolClasses.map((item) => item.name),
+      ...databaseEntries.map((item) => item.className),
+    ])
+  ).sort((a, b) => a.localeCompare(b, undefined, { numeric: true }))
   const activeTeachers = teachers.filter((teacher) => teacher.active)
 
-  const selectedTeacher = teachers.find(
-    (teacher) => teacher.id === teacherId
-  )
+  const selectedTeacher = teachers.find((teacher) => teacher.id === teacherId)
 
   const visibleEntries = [...databaseEntries]
     .filter((entry) => filterDay === "All" || entry.day === filterDay)
     .sort((a, b) => {
-      const dayDifference =
-        DAYS.indexOf(a.day) - DAYS.indexOf(b.day)
-
-      return dayDifference !== 0
-        ? dayDifference
-        : a.period - b.period
+      const dayDifference = DAYS.indexOf(a.day) - DAYS.indexOf(b.day)
+      if (dayDifference !== 0) return dayDifference
+      if (a.period !== b.period) return a.period - b.period
+      return a.className.localeCompare(b.className, undefined, { numeric: true })
     })
 
   function getTeacherName(id: string) {
     return (
-      teachers.find((teacher) => teacher.id === id)?.name ??
-      "Unknown Teacher"
+      teachers.find((teacher) => teacher.id === id)?.name ?? "Unknown Teacher"
     )
   }
 
-  // Teacher selection
-  
+  function findClassPeers(
+    targetClassName: string,
+    targetDay: string,
+    targetPeriod: number,
+    excludeTeacherId?: string
+  ): TimetableEntry[] {
+    const normalizedClass = targetClassName.trim().toLowerCase()
+    if (!normalizedClass) return []
+    return databaseEntries.filter(
+      (entry) =>
+        entry.day === targetDay &&
+        entry.period === targetPeriod &&
+        entry.className.trim().toLowerCase() === normalizedClass &&
+        entry.teacherId !== excludeTeacherId
+    )
+  }
+
+  function findWeeklyUnavailability(
+    targetTeacherId: string,
+    targetDay: string,
+    targetPeriod: number
+  ): TeacherUnavailability | undefined {
+    if (!targetTeacherId) return undefined
+    return unavailabilities.find(
+      (item) =>
+        item.teacherId === targetTeacherId &&
+        item.scope === "weekly" &&
+        item.day === targetDay &&
+        item.periods.includes(targetPeriod)
+    )
+  }
+
+  function isSplitPeriodEntry(entry: TimetableEntry): boolean {
+    return (
+      findClassPeers(entry.className, entry.day, entry.period, entry.teacherId)
+        .length > 0
+    )
+  }
+
+  const wizardClassPeers = findClassPeers(
+    wizardClass,
+    currentDay,
+    currentPeriod,
+    teacherId
+  )
+  const manualClassPeers = findClassPeers(className, day, period, teacherId)
+  const wizardWeeklyUnavail = findWeeklyUnavailability(
+    teacherId,
+    currentDay,
+    currentPeriod
+  )
+  const manualWeeklyUnavail = findWeeklyUnavailability(teacherId, day, period)
+
   // Teacher selection and resume saved progress
   async function handleTeacherChange(id: string) {
     const requestId = ++progressRequestId.current
@@ -160,9 +229,9 @@ const progressRequestId = useRef(0)
     setSuccess("")
 
     if (!id) {
-  setIsLoadingProgress(false)
-  return
-}
+      setIsLoadingProgress(false)
+      return
+    }
 
     setIsLoadingProgress(true)
 
@@ -186,34 +255,29 @@ const progressRequestId = useRef(0)
         occupiedSlots.add(`${item.day}:${item.period}`)
       }
       const firstIncomplete = Array.from({ length: 40 }, (_, index) => {
-        const day = DAYS[Math.floor(index / 8)]
-        const period = PERIODS[index % 8]
-        return occupiedSlots.has(`${day}:${period}`)
+        const slotDay = DAYS[Math.floor(index / 8)]
+        const slotPeriod = PERIODS[index % 8]
+        return occupiedSlots.has(`${slotDay}:${slotPeriod}`)
       }).findIndex((completed) => !completed)
 
       // Resume at the first incomplete period.
-      setCurrentStep(
-        firstIncomplete === -1 ? 39 : firstIncomplete
+      setCurrentStep(firstIncomplete === -1 ? 39 : firstIncomplete)
+    } catch (loadError) {
+      // Ignore errors from an outdated teacher request.
+      if (requestId !== progressRequestId.current) return
+
+      setError(
+        loadError instanceof Error
+          ? loadError.message
+          : "Failed to load teacher progress."
       )
-    
-} catch (loadError) {
-  // Ignore errors from an outdated teacher request.
-  if (requestId !== progressRequestId.current) return
-
-  setError(
-    loadError instanceof Error
-      ? loadError.message
-      : "Failed to load teacher progress."
-  )
-} finally {
-  // Only the latest request can stop the loading state.
-  if (requestId === progressRequestId.current) {
-    setIsLoadingProgress(false)
+    } finally {
+      // Only the latest request can stop the loading state.
+      if (requestId === progressRequestId.current) {
+        setIsLoadingProgress(false)
+      }
+    }
   }
-}
-
-  }
-
 
   // Wizard navigation
   function handleNext() {
@@ -235,17 +299,17 @@ const progressRequestId = useRef(0)
   }
 
   function handleEditLesson() {
-  if (!currentLesson) return
+    if (!currentLesson) return
 
-  setWizardSubject(currentLesson.subject)
-  setWizardClass(currentLesson.className)
+    setWizardSubject(currentLesson.subject)
+    setWizardClass(currentLesson.className)
 
-  setIsEditingLesson(true)
-  setShowLessonForm(true)
+    setIsEditingLesson(true)
+    setShowLessonForm(true)
 
-  setError("")
-  setSuccess("")
-}
+    setError("")
+    setSuccess("")
+  }
 
   // Save Free Period
   async function handleFreePeriod() {
@@ -263,35 +327,35 @@ const progressRequestId = useRef(0)
     try {
       if (currentLesson) {
         await updateTimetablePeriod({
-          teacherId, day: currentDay, period: currentPeriod, status: "FREE",
+          teacherId,
+          day: currentDay,
+          period: currentPeriod,
+          status: "FREE",
         })
-        setDatabaseEntries((previous) => previous.filter((item) => item.id !== currentLesson.id))
+        setDatabaseEntries((previous) =>
+          previous.filter((item) => item.id !== currentLesson.id)
+        )
       } else {
         await saveFreePeriod(teacherId, currentDay, currentPeriod)
       }
       setSavedProgress((previous) => [
-  ...previous.filter(
-    (item) =>
-      !(item.day === currentDay && item.period === currentPeriod)
-  ),
-  {
-    day: currentDay,
-    period: currentPeriod,
-    status: "FREE",
-  },
-])
+        ...previous.filter(
+          (item) => !(item.day === currentDay && item.period === currentPeriod)
+        ),
+        {
+          day: currentDay,
+          period: currentPeriod,
+          status: "FREE",
+        },
+      ])
 
       setShowLessonForm(false)
       setIsEditingLesson(false)
       setWizardClass("")
 
-      setSuccess(
-        `${currentDay} Period ${currentPeriod} saved as Free.`
-      )
+      setSuccess(`${currentDay} Period ${currentPeriod} saved as Free.`)
 
-      setCurrentStep((previous) =>
-        Math.min(previous + 1, 39)
-      )
+      setCurrentStep((previous) => Math.min(previous + 1, 39))
     } catch (saveError) {
       setError(
         saveError instanceof Error
@@ -312,7 +376,10 @@ const progressRequestId = useRef(0)
       return
     }
 
-    if (!wizardSubject.trim() || !wizardClass.trim()) {
+    const cleanWizardClass = wizardClass.trim()
+    const cleanWizardSubject = wizardSubject.trim()
+
+    if (!cleanWizardSubject || !cleanWizardClass) {
       setError("Please select a subject and enter a class.")
       return
     }
@@ -320,7 +387,7 @@ const progressRequestId = useRef(0)
     if (
       !selectedTeacher ||
       !selectedTeacher.active ||
-      !selectedTeacher.subjects.includes(wizardSubject)
+      !selectedTeacher.subjects.includes(cleanWizardSubject)
     ) {
       setError("Please select a valid subject for this teacher.")
       return
@@ -331,38 +398,43 @@ const progressRequestId = useRef(0)
     setIsSaving(true)
 
     try {
-      const savedEntry = isEditingLesson || currentLesson
-        ? (await updateTimetablePeriod({
-            teacherId,
-            className: wizardClass.trim(),
-            subject: wizardSubject.trim(),
-            day: currentDay,
-            period: currentPeriod,
-            status: "LESSON",
-          })).entry!
-        : await createTimetable({
-            teacherId,
-            className: wizardClass.trim(),
-            subject: wizardSubject.trim(),
-            day: currentDay,
-            period: currentPeriod,
-          })
-      setSavedProgress((previous) => [
-  ...previous.filter(
-    (item) =>
-      !(item.day === currentDay && item.period === currentPeriod)
-  ),
-  {
-    day: currentDay,
-    period: currentPeriod,
-    status: "LESSON",
-  },
-])
+      const savedEntry =
+        isEditingLesson || currentLesson
+          ? (
+              await updateTimetablePeriod({
+                teacherId,
+                className: cleanWizardClass,
+                subject: cleanWizardSubject,
+                day: currentDay,
+                period: currentPeriod,
+                status: "LESSON",
+              })
+            ).entry
+          : await createTimetable({
+              teacherId,
+              className: cleanWizardClass,
+              subject: cleanWizardSubject,
+              day: currentDay,
+              period: currentPeriod,
+            })
 
-      // Update the table immediately.
-      setDatabaseEntries((previous) => [
-        ...previous.filter((item) => item.id !== savedEntry.id), savedEntry,
+      setSavedProgress((previous) => [
+        ...previous.filter(
+          (item) => !(item.day === currentDay && item.period === currentPeriod)
+        ),
+        {
+          day: currentDay,
+          period: currentPeriod,
+          status: "LESSON",
+        },
       ])
+
+      if (savedEntry) {
+        setDatabaseEntries((previous) => [
+          ...previous.filter((item) => item.id !== savedEntry.id),
+          savedEntry,
+        ])
+      }
 
       // Refresh from Supabase.
       try {
@@ -375,18 +447,12 @@ const progressRequestId = useRef(0)
       setIsEditingLesson(false)
       setWizardClass("")
 
-      setSuccess(
-        `${currentDay} Period ${currentPeriod} saved successfully.`
-      )
+      setSuccess(`${currentDay} Period ${currentPeriod} saved successfully.`)
 
-      setCurrentStep((previous) =>
-        Math.min(previous + 1, 39)
-      )
+      setCurrentStep((previous) => Math.min(previous + 1, 39))
     } catch (saveError) {
       setError(
-        saveError instanceof Error
-          ? saveError.message
-          : "Failed to save lesson."
+        saveError instanceof Error ? saveError.message : "Failed to save lesson."
       )
     } finally {
       setIsSaving(false)
@@ -425,6 +491,20 @@ const progressRequestId = useRef(0)
       return
     }
 
+    const exactDuplicate = databaseEntries.some(
+      (entry) =>
+        entry.day === day &&
+        entry.period === period &&
+        entry.teacherId === teacherId &&
+        entry.className.trim().toLowerCase() === cleanClass.toLowerCase() &&
+        entry.subject.trim().toLowerCase() === cleanSubject.toLowerCase()
+    )
+
+    if (exactDuplicate) {
+      setError("This exact timetable entry already exists.")
+      return
+    }
+
     const teacherConflict = databaseEntries.some(
       (entry) =>
         entry.day === day &&
@@ -434,19 +514,6 @@ const progressRequestId = useRef(0)
 
     if (teacherConflict) {
       setError("This teacher already has a class during that period.")
-      return
-    }
-
-    const classConflict = databaseEntries.some(
-      (entry) =>
-        entry.day === day &&
-        entry.period === period &&
-        entry.className.trim().toLowerCase() ===
-          cleanClass.toLowerCase()
-    )
-
-    if (classConflict) {
-      setError("This class already has a lesson during that period.")
       return
     }
 
@@ -514,9 +581,11 @@ const progressRequestId = useRef(0)
         previous.filter((item) => item.id !== id)
       )
       if (entry.teacherId === teacherId) {
-        setSavedProgress((previous) => previous.filter(
-          (item) => !(item.day === entry.day && item.period === entry.period)
-        ))
+        setSavedProgress((previous) =>
+          previous.filter(
+            (item) => !(item.day === entry.day && item.period === entry.period)
+          )
+        )
       }
 
       setSuccess("Timetable entry removed from Supabase successfully.")
@@ -546,7 +615,8 @@ const progressRequestId = useRef(0)
         </h1>
 
         <p className="mt-1 text-slate-400">
-          Manage weekly lessons and prevent scheduling conflicts.
+          Manage weekly lessons, split-class groups, and teacher scheduling
+          conflicts.
         </p>
 
         <div className="mt-4 flex flex-wrap items-center gap-3">
@@ -577,7 +647,9 @@ const progressRequestId = useRef(0)
             <button
               key={teacher.id}
               type="button"
-              onClick={() => handleTeacherChange(teacher.id)}
+              onClick={() => {
+                void handleTeacherChange(teacher.id)
+              }}
               disabled={isSaving}
               className={`rounded-xl border p-4 text-left transition disabled:opacity-50 ${
                 teacherId === teacher.id
@@ -596,9 +668,7 @@ const progressRequestId = useRef(0)
 
         {selectedTeacher && (
           <div className="mt-5 rounded-lg border border-cyan-700 bg-slate-900 p-4">
-            <p className="text-sm text-slate-400">
-              Selected Teacher
-            </p>
+            <p className="text-sm text-slate-400">Selected Teacher</p>
 
             <p className="mt-1 font-semibold text-cyan-400">
               {selectedTeacher.name}
@@ -621,71 +691,80 @@ const progressRequestId = useRef(0)
           <p className="mt-3 text-lg text-white">
             {currentDay} — Period {currentPeriod}
           </p>
+
+          {wizardWeeklyUnavail && (
+            <p className="mt-2 rounded-lg border border-amber-600/50 bg-amber-950/50 p-3 text-sm text-amber-300">
+              Weekly Unavailability: {selectedTeacher.name} is marked
+              unavailable on {currentDay} Period {currentPeriod}
+              {wizardWeeklyUnavail.reason
+                ? ` (${wizardWeeklyUnavail.reason})`
+                : ""}
+              . Consider saving this slot as a Free Period.
+            </p>
+          )}
+
           {currentSavedPeriod && (
-  <p className="mt-2 text-sm font-medium text-green-400">
-    Already saved:{" "}
-    {currentSavedPeriod.status === "FREE"
-      ? "Free Period"
-      : "Lesson"}
-  </p>
-)}
-{currentLesson && (
-  <div className="mt-3 rounded-lg border border-slate-600 bg-slate-900 p-4">
-    <p className="font-semibold text-cyan-400">
-      Saved Lesson Details
-    </p>
-    {currentLesson && (
-  <button
-    type="button"
-    onClick={handleEditLesson}
-    disabled={isSaving || isLoadingProgress}
-    className="mt-3 rounded-lg bg-amber-500 px-5 py-3 font-semibold text-slate-950 hover:bg-amber-400 disabled:opacity-50"
-  >
-    Edit Lesson
-  </button>
-)}
+            <p className="mt-2 text-sm font-medium text-green-400">
+              Already saved:{" "}
+              {currentSavedPeriod.status === "FREE" ? "Free Period" : "Lesson"}
+            </p>
+          )}
 
-    <p className="mt-2 text-sm text-white">
-      Subject: {currentLesson.subject}
-    </p>
+          {currentLesson && (
+            <div className="mt-3 rounded-lg border border-slate-600 bg-slate-900 p-4">
+              <p className="font-semibold text-cyan-400">
+                Saved Lesson Details
+              </p>
+              <button
+                type="button"
+                onClick={handleEditLesson}
+                disabled={isSaving || isLoadingProgress}
+                className="mt-3 rounded-lg bg-amber-500 px-5 py-3 font-semibold text-slate-950 hover:bg-amber-400 disabled:opacity-50"
+              >
+                Edit Lesson
+              </button>
 
-    <p className="mt-1 text-sm text-white">
-      Class: {currentLesson.className}
-    </p>
-  </div>
-)}
+              <p className="mt-2 text-sm text-white">
+                Subject: {currentLesson.subject}
+              </p>
+
+              <p className="mt-1 text-sm text-white">
+                Class: {currentLesson.className}
+              </p>
+            </div>
+          )}
 
           <p className="mt-1 text-sm text-slate-400">
             Step {currentStep + 1} of 40
           </p>
           <p className="mt-2 text-sm text-green-400">
-  Completed: {completedCount} / 40 periods
-</p>
+            Completed: {completedCount} / 40 periods
+          </p>
 
-          {/* Navigation Progress Bar */}
-          
-{/* Actual Timetable Completion Progress */}
-<div className="mt-4 h-2 overflow-hidden rounded-full bg-slate-700">
-  <div
-    className="h-full bg-green-400 transition-all duration-300"
-    style={{
-      width: `${(completedCount / 40) * 100}%`,
-    }}
-  />
-</div>
+          {/* Actual Timetable Completion Progress */}
+          <div className="mt-4 h-2 overflow-hidden rounded-full bg-slate-700">
+            <div
+              className="h-full bg-green-400 transition-all duration-300"
+              style={{
+                width: `${(completedCount / 40) * 100}%`,
+              }}
+            />
+          </div>
 
-<p className="mt-2 text-right text-sm text-slate-400">
-  {Math.round((completedCount / 40) * 100)}% completed
-</p>
-
+          <p className="mt-2 text-right text-sm text-slate-400">
+            {Math.round((completedCount / 40) * 100)}% completed
+          </p>
 
           {/* Period Action Buttons */}
           <div className="mt-6 grid grid-cols-2 gap-3">
             <button
               type="button"
-              onClick={handleFreePeriod}
+              onClick={() => {
+                void handleFreePeriod()
+              }}
               disabled={
-                isSaving || isLoadingProgress ||
+                isSaving ||
+                isLoadingProgress ||
                 databaseStatus !== "Connected to Supabase"
               }
               className="rounded-lg border border-slate-600 bg-slate-700 p-4 font-semibold text-white hover:bg-slate-600 disabled:cursor-not-allowed disabled:opacity-50"
@@ -716,14 +795,13 @@ const progressRequestId = useRef(0)
           </div>
 
           {/* Wizard Lesson Form */}
-{showLessonForm && (
-  <div className="mt-5 space-y-4 rounded-lg bg-slate-900 p-4">
+          {showLessonForm && (
+            <div className="mt-5 space-y-4 rounded-lg bg-slate-900 p-4">
+              <h3 className="font-semibold text-white">
+                {isEditingLesson ? "Edit Existing Lesson" : "Add New Lesson"}
+              </h3>
 
-    <h3 className="font-semibold text-white">
-      {isEditingLesson ? "Edit Existing Lesson" : "Add New Lesson"}
-    </h3>
-
-    {selectedTeacher.subjects.length > 1 ? (
+              {selectedTeacher.subjects.length > 1 ? (
                 <div>
                   <label
                     htmlFor="wizard-subject"
@@ -735,9 +813,7 @@ const progressRequestId = useRef(0)
                   <select
                     id="wizard-subject"
                     value={wizardSubject}
-                    onChange={(event) =>
-                      setWizardSubject(event.target.value)
-                    }
+                    onChange={(event) => setWizardSubject(event.target.value)}
                     className="w-full rounded-lg bg-slate-700 p-3 text-white"
                   >
                     <option value="">Choose a subject</option>
@@ -770,21 +846,46 @@ const progressRequestId = useRef(0)
                   className="w-full rounded-lg bg-slate-700 p-3 text-white"
                 >
                   <option value="">Choose a class</option>
-                  {availableClassNames.map(name => <option key={name} value={name}>{name}</option>)}
+                  {availableClassNames.map((itemName) => (
+                    <option key={itemName} value={itemName}>
+                      {itemName}
+                    </option>
+                  ))}
                 </select>
               </div>
+
+              {wizardClassPeers.length > 0 && (
+                <p className="rounded-lg border border-cyan-700/60 bg-cyan-950/40 p-3 text-xs text-cyan-200">
+                  Split Period Notice: {wizardClass} already has{" "}
+                  {wizardClassPeers
+                    .map(
+                      (peer) =>
+                        `${peer.subject} (${getTeacherName(peer.teacherId)})`
+                    )
+                    .join(", ")}{" "}
+                  on {currentDay} Period {currentPeriod}. Saving creates a
+                  multi-teacher split period.
+                </p>
+              )}
 
               {/* Save Lesson Button */}
               <button
                 type="button"
-                onClick={handleSaveLesson}
+                onClick={() => {
+                  void handleSaveLesson()
+                }}
                 disabled={
-                  isSaving || isLoadingProgress ||
+                  isSaving ||
+                  isLoadingProgress ||
                   databaseStatus !== "Connected to Supabase"
                 }
                 className="rounded-lg bg-cyan-600 px-5 py-3 font-semibold text-white hover:bg-cyan-500 disabled:cursor-not-allowed disabled:opacity-50"
               >
-                {isSaving ? "Saving..." : isEditingLesson ? "Save Changes" : "Save Lesson"}
+                {isSaving
+                  ? "Saving..."
+                  : isEditingLesson
+                    ? "Save Changes"
+                    : "Save Lesson"}
               </button>
             </div>
           )}
@@ -827,7 +928,9 @@ const progressRequestId = useRef(0)
 
       {/* Manual Timetable Entry */}
       <form
-        onSubmit={handleSubmit}
+        onSubmit={(event) => {
+          void handleSubmit(event)
+        }}
         className="space-y-4 rounded-xl bg-slate-800 p-6"
       >
         <h2 className="text-lg font-semibold text-white">
@@ -846,9 +949,9 @@ const progressRequestId = useRef(0)
             <select
               id="manual-teacher"
               value={teacherId}
-              onChange={(event) =>
-                handleTeacherChange(event.target.value)
-              }
+              onChange={(event) => {
+                void handleTeacherChange(event.target.value)
+              }}
               className="w-full rounded-lg bg-slate-700 p-3 text-white"
             >
               <option value="">Select teacher</option>
@@ -876,7 +979,11 @@ const progressRequestId = useRef(0)
               className="w-full rounded-lg bg-slate-700 p-3 text-white"
             >
               <option value="">Choose a class</option>
-              {availableClassNames.map(name => <option key={name} value={name}>{name}</option>)}
+              {availableClassNames.map((itemName) => (
+                <option key={itemName} value={itemName}>
+                  {itemName}
+                </option>
+              ))}
             </select>
           </div>
 
@@ -891,9 +998,7 @@ const progressRequestId = useRef(0)
             <select
               id="manual-subject"
               value={subject}
-              onChange={(event) =>
-                setSubject(event.target.value)
-              }
+              onChange={(event) => setSubject(event.target.value)}
               className="w-full rounded-lg bg-slate-700 p-3 text-white"
             >
               <option value="">Select subject</option>
@@ -939,9 +1044,7 @@ const progressRequestId = useRef(0)
             <select
               id="manual-period"
               value={period}
-              onChange={(event) =>
-                setPeriod(Number(event.target.value))
-              }
+              onChange={(event) => setPeriod(Number(event.target.value))}
               className="w-full rounded-lg bg-slate-700 p-3 text-white"
             >
               {PERIODS.map((item) => (
@@ -953,12 +1056,45 @@ const progressRequestId = useRef(0)
           </div>
         </div>
 
+        {manualWeeklyUnavail && (
+          <p className="rounded-lg border border-amber-600/50 bg-amber-950/50 p-3 text-sm text-amber-300">
+            Weekly Unavailability: {getTeacherName(teacherId)} is marked
+            unavailable on {day} Period {period}
+            {manualWeeklyUnavail.reason
+              ? ` (${manualWeeklyUnavail.reason})`
+              : ""}
+            .
+          </p>
+        )}
+
+        {manualClassPeers.length > 0 && (
+          <p className="rounded-lg border border-cyan-700/60 bg-cyan-950/40 p-3 text-sm text-cyan-200">
+            Split Period Notice: {className} already has{" "}
+            {manualClassPeers
+              .map(
+                (peer) => `${peer.subject} (${getTeacherName(peer.teacherId)})`
+              )
+              .join(", ")}{" "}
+            on {day} Period {period}. Adding another teacher/subject creates a
+            split period.
+          </p>
+        )}
+
+        {error && !selectedTeacher && (
+          <p role="alert" className="text-sm text-red-400">
+            {error}
+          </p>
+        )}
+
+        {success && !selectedTeacher && (
+          <p role="status" className="text-sm text-green-400">
+            {success}
+          </p>
+        )}
+
         <button
           type="submit"
-          disabled={
-            isSaving ||
-            databaseStatus !== "Connected to Supabase"
-          }
+          disabled={isSaving || databaseStatus !== "Connected to Supabase"}
           className="rounded-lg bg-cyan-500 px-5 py-3 font-semibold text-slate-950 hover:bg-cyan-400 disabled:cursor-not-allowed disabled:opacity-50"
         >
           {isSaving ? "Saving..." : "Add Timetable Entry"}
@@ -968,16 +1104,12 @@ const progressRequestId = useRef(0)
       {/* Weekly Timetable Table */}
       <div className="rounded-xl bg-slate-800 p-6">
         <div className="mb-4 flex flex-wrap items-center justify-between gap-4">
-          <h2 className="text-lg font-semibold text-white">
-            Weekly Timetable
-          </h2>
+          <h2 className="text-lg font-semibold text-white">Weekly Timetable</h2>
 
           <select
             aria-label="Filter timetable by day"
             value={filterDay}
-            onChange={(event) =>
-              setFilterDay(event.target.value)
-            }
+            onChange={(event) => setFilterDay(event.target.value)}
             className="rounded-lg bg-slate-700 p-2 text-white"
           >
             <option value="All">All Days</option>
@@ -1009,37 +1141,45 @@ const progressRequestId = useRef(0)
               </thead>
 
               <tbody>
-                {visibleEntries.map((entry) => (
-                  <tr
-                    key={entry.id}
-                    className="border-b border-slate-700 text-white"
-                  >
-                    <td className="p-3">{entry.day}</td>
-                    <td className="p-3">{entry.period}</td>
-                    <td className="p-3">{entry.className}</td>
-                    <td className="p-3">{entry.subject}</td>
-                    <td className="p-3">
-                      {getTeacherName(entry.teacherId)}
-                    </td>
-                    <td className="p-3">
-                      <button
-                        type="button"
-                        onClick={() => handleDelete(entry.id)}
-                        disabled={
-                          deletingId !== null ||
-                          isSaving ||
-                          databaseStatus !== "Connected to Supabase"
-                        }
-                        title="Delete Supabase timetable entry"
-                        className="rounded-lg bg-red-600 px-3 py-2 text-xs text-white hover:bg-red-500 disabled:cursor-not-allowed disabled:opacity-40"
-                      >
-                        {deletingId === entry.id
-                          ? "Deleting..."
-                          : "Delete"}
-                      </button>
-                    </td>
-                  </tr>
-                ))}
+                {visibleEntries.map((entry) => {
+                  const split = isSplitPeriodEntry(entry)
+                  return (
+                    <tr
+                      key={entry.id}
+                      className="border-b border-slate-700 text-white"
+                    >
+                      <td className="p-3">{entry.day}</td>
+                      <td className="p-3">{entry.period}</td>
+                      <td className="p-3">
+                        <span>{entry.className}</span>
+                        {split && (
+                          <span className="ml-2 rounded bg-cyan-950 px-2 py-0.5 text-xs text-cyan-300">
+                            Split
+                          </span>
+                        )}
+                      </td>
+                      <td className="p-3">{entry.subject}</td>
+                      <td className="p-3">{getTeacherName(entry.teacherId)}</td>
+                      <td className="p-3">
+                        <button
+                          type="button"
+                          onClick={() => {
+                            void handleDelete(entry.id)
+                          }}
+                          disabled={
+                            deletingId !== null ||
+                            isSaving ||
+                            databaseStatus !== "Connected to Supabase"
+                          }
+                          title="Delete Supabase timetable entry"
+                          className="rounded-lg bg-red-600 px-3 py-2 text-xs text-white hover:bg-red-500 disabled:cursor-not-allowed disabled:opacity-40"
+                        >
+                          {deletingId === entry.id ? "Deleting..." : "Delete"}
+                        </button>
+                      </td>
+                    </tr>
+                  )
+                })}
               </tbody>
             </table>
           </div>
